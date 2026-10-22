@@ -18,6 +18,7 @@ export interface Scene {
   selectedPiece: number | null;
   graph: Graph;
   faceColors: Map<number, string>;
+  overflowing: boolean; // content reaches past the canvas: warn with the border
   hover: Pt | null; // snapped grid point under the mouse
   marks: Pt[]; // points already clicked for the shape being drawn
   preview: Curve | null;
@@ -159,8 +160,8 @@ export function render(ctx: CanvasRenderingContext2D, s: Scene) {
   ctx.fillStyle = COLORS.board;
   ctx.fillRect(o.x, o.y, w * vp.scale, h * vp.scale);
   if (s.showGrid) drawGrid(ctx, s);
-  ctx.strokeStyle = COLORS.border;
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = s.overflowing ? '#f08c00' : COLORS.border;
+  ctx.lineWidth = s.overflowing ? 2 : 1;
   ctx.strokeRect(Math.round(o.x) + 0.5, Math.round(o.y) + 0.5, Math.round(w * vp.scale), Math.round(h * vp.scale));
   if (s.keylines.size) drawKeylines(ctx, s);
 

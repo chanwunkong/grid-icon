@@ -32,6 +32,7 @@ export class Editor {
   fillErase = false; // the fill tool removes fills instead of adding them
   graph!: Graph; // exact planar graph of the current geometry
   faceColors = new Map<number, string>();
+  overflowing = false; // drawn content reaches past the canvas (set by the export panel)
   showGrid = true;
   keylines = new Set<Keyline>();
   onChange: () => void = () => {};
@@ -395,7 +396,7 @@ export class Editor {
       const scene: Scene = {
         project: this.project, vp: this.vp, width: this.cssW, height: this.cssH,
         showGrid: this.showGrid, keylines: this.keylines, selectedId: this.selectedId,
-        graph: this.graph, faceColors: this.faceColors, selectedPiece: this.selectedPiece,
+        graph: this.graph, faceColors: this.faceColors, selectedPiece: this.selectedPiece, overflowing: this.overflowing,
         hover: this.tool === 'select' || this.tool === 'fill' ? null : this.hover,
         marks: this.marks, preview: this.dragging ? preview : null,
         guide: this.dragging ? this.hover : null, guideTouch: this.dragTouch,

@@ -98,9 +98,10 @@ function leaving(g: Graph, pc: Piece, atStart: boolean) {
 }
 
 /**
- * Join the visible pieces into stroke paths. Pieces whose cap is not round are chained at shared
- * end points so the join style applies; at an end point with several pieces, the two that
- * continue most smoothly are joined first. Pieces that come back to their start become closed paths.
+ * Join the visible pieces into stroke paths. Pieces with the same style are chained at shared end
+ * points, so the join style applies at corners and the cap style only at free ends (round caps
+ * too: "round cap + miter join" gives sharp corners). At an end point with several pieces, the
+ * two that continue most smoothly are joined first. Pieces that come back to their start are closed.
  */
 export function buildStrokes(curves: Curve[], g: Graph): Stroke[] {
   const byId = new Map(curves.map((c) => [c.id, c]));
@@ -108,12 +109,7 @@ export function buildStrokes(curves: Curve[], g: Graph): Stroke[] {
   const out: Stroke[] = [];
   const groups = new Map<string, Piece[]>();
   for (const p of visible) {
-    const st = byId.get(p.curve)!.style;
-    if (st.cap === 'round') {
-      out.push({ style: st, steps: [{ piece: p.index, reversed: false }], closed: p.from === p.to });
-      continue;
-    }
-    const k = styleKey(st);
+    const k = styleKey(byId.get(p.curve)!.style);
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k)!.push(p);
   }

@@ -3,12 +3,12 @@ import { MAX_GRID, MIN_GRID, newProject, parseProject, serialize } from '../mode
 import type { Cap, Curve, Join } from '../model/types';
 import type { Keyline } from '../view/render';
 import { r2 } from '../model/geometry';
-import { DEFAULT_SIZES, download, pngBlob, renderPNG, renderSVG, zip, type ExportOptions } from '../export/export';
+import { DEFAULT_SIZES, download, overflow, pngBlob, renderPNG, renderSVG, zip, type ExportOptions } from '../export/export';
 
 const TOOLS: { id: Tool; label: string; key: string }[] = [
   { id: 'line', label: '直線', key: 'L' },
   { id: 'circle', label: '圓', key: 'C' },
-  { id: 'select', label: '選取 / 刪除', key: 'V' },
+  { id: 'select', label: '選取', key: 'V' },
   { id: 'fill', label: '填色', key: 'B' },
 ];
 const KEYLINES: { id: Keyline; label: string }[] = [
@@ -18,8 +18,14 @@ const KEYLINES: { id: Keyline; label: string }[] = [
   { id: 'landscape', label: '橫式矩形' },
 ];
 const PRESETS = [16, 24, 32, 48, 64, 128];
-const CAPS: { v: Cap; t: string }[] = [{ v: 'round', t: '圓頭 round' }, { v: 'butt', t: '平頭 butt' }, { v: 'square', t: '方頭 square' }];
-const JOINS: { v: Join; t: string }[] = [{ v: 'round', t: '圓角 round' }, { v: 'miter', t: '尖角 miter' }, { v: 'bevel', t: '斜角 bevel' }];
+// one choice styles both the free ends and the corners of a line
+type Corner = 'round' | 'sharp' | 'bevel';
+const CORNERS: { v: Corner; t: string; cap: Cap; join: Join; tip: string }[] = [
+  { v: 'round', t: '圓角', cap: 'round', join: 'round', tip: '線端半圓、轉角圓滑' },
+  { v: 'sharp', t: '尖角', cap: 'square', join: 'miter', tip: '線端方形（延伸半個線寬）、轉角尖角（超過 miter limit 改斜切）' },
+  { v: 'bevel', t: '斜切', cap: 'butt', join: 'bevel', tip: '線端平切（剛好停在格點）、轉角切掉尖角' },
+];
+const cornerOf = (j: Join): Corner => (j === 'round' ? 'round' : j === 'miter' ? 'sharp' : 'bevel');
 
 const h = <K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...kids: (Node | string)[]) => {
   const el = document.createElement(tag);
@@ -49,29 +55,41 @@ export function mountApp(root: HTMLElement) {
   const gridInfo = h('span', { class: 'info' });
   topbar.append(btnNew, btnOpen, btnSave, h('span', { class: 'spacer' }), gridInfo, btnUndo, btnRedo, btnSheet);
 
-  // tool buttons (a bottom strip on phones) + the rest of the left column (moved into the settings sheet on phones)
+  // left column on desktop; on phones a bottom panel of rows that wrap (never scrolls sideways):
+  // the main tools are always there, actions appear when they apply, the rest opens with 「更多」
   const tools = h('aside', { class: 'tools' }, h('div', { class: 'section-title' }, '工具'));
   const extra = h('div', { class: 'extra' });
+  const toolRow = h('div', { class: 'tool-row' });
   const toolButtons = new Map<Tool, HTMLButtonElement>();
   for (const t of TOOLS) {
     const b = h('button', { class: 'tool' }, h('span', {}, t.label), h('kbd', {}, t.key));
     toolButtons.set(t.id, b);
-    tools.append(b);
+    toolRow.append(b);
   }
-  // guide toggle: new curves become guides, or the selected curve switches between guide and normal
-  const guideBtn = h('button', { class: 'tool', title: '輔助線只用來切割、產生交點；虛線顯示，不會匯出（G）' }, h('span', {}, '輔助線'), h('kbd', {}, 'G'));
-  // phones have no keyboard: these stand in for Esc and Delete
-  const mCancel = h('button', { class: 'mobile-only' }, '取消');
-  const mErase = h('button', { class: 'mobile-only' }, '刪這段'), mDelete = h('button', { class: 'mobile-only' }, '刪整條');
+  const moreBtn = h('button', { class: 'mobile-only more-btn' }, '更多');
+  toolRow.append(moreBtn);
+  // shown when a piece is selected (phones have no Delete key)
+  const mErase = h('button', {}, '刪這段'), mDelete = h('button', {}, '刪整條');
+  const selRow = h('div', { class: 'ctx-row mobile-only-flex' }, mErase, mDelete);
   // fill options: colour and "remove fill" mode (shown while the fill tool is active)
   const fillColor = h('input', { type: 'color', value: '#2f6bff', title: '填色顏色' }) as HTMLInputElement;
   const fillErase = h('button', { title: '改成移除填色' }, '移除填色');
-  const fillBox = h('div', { class: 'fill-box' }, fillColor, fillErase);
-  // line width: always at hand (whole grid units), for the next line or the selected one
+  const fillBox = h('div', { class: 'fill-box ctx-row' }, fillColor, fillErase);
+  // advanced: guide toggle, width, corner style, cancel
+  const guideBtn = h('button', { class: 'tool', title: '輔助線只用來切割、產生交點；虛線顯示，不會匯出（G）' }, h('span', {}, '輔助線'), h('kbd', {}, 'G'));
   const wDec = h('button', { title: '線寬 −1' }, '−'), wInc = h('button', { title: '線寬 +1' }, '+');
   const wVal = h('span', { class: 'wval' });
   const widthStep = h('div', { class: 'width-step' }, h('span', { class: 'wlabel' }, '線寬'), wDec, wVal, wInc);
-  tools.append(guideBtn, widthStep, fillBox, mCancel, mErase, mDelete, extra);
+  const cornerBtns = new Map<Corner, HTMLButtonElement>();
+  const cornerSeg = h('div', { class: 'seg corner-seg' });
+  for (const c of CORNERS) {
+    const b = h('button', { title: c.tip }, c.t);
+    cornerBtns.set(c.v, b);
+    cornerSeg.append(b);
+  }
+  const mCancel = h('button', { class: 'mobile-only' }, '取消');
+  const more = h('div', { class: 'more' }, guideBtn, widthStep, h('div', { class: 'wlabel corner-label' }, '線端與轉角'), cornerSeg, mCancel);
+  tools.append(toolRow, selRow, fillBox, more, extra);
   const gridCheck = h('input', { type: 'checkbox' }) as HTMLInputElement;
   gridCheck.checked = true;
   extra.append(h('div', { class: 'section-title' }, '顯示'), h('label', { class: 'check' }, gridCheck, '格線'));
@@ -97,10 +115,8 @@ export function mountApp(root: HTMLElement) {
   props.append(sheetClose, propsBody);
   const styleTitle = h('div', { class: 'section-title' });
   const widthIn = h('input', { type: 'number', min: '1', step: '1' }) as HTMLInputElement;
-  const capSel = h('select') as HTMLSelectElement;
-  for (const c of CAPS) capSel.append(new Option(c.t, c.v));
-  const joinSel = h('select') as HTMLSelectElement;
-  for (const j of JOINS) joinSel.append(new Option(j.t, j.v));
+  const cornerSel = h('select') as HTMLSelectElement;
+  for (const c of CORNERS) cornerSel.append(new Option(`${c.t}（${c.tip}）`, c.v));
   const miterIn = h('input', { type: 'number', min: '1', step: '0.5' }) as HTMLInputElement;
   // ---- export
   const exportBox = h('div');
@@ -125,6 +141,10 @@ export function mountApp(root: HTMLElement) {
   const bgIn = h('input', { type: 'color', value: '#ffffff' }) as HTMLInputElement;
   const marginIn = h('input', { type: 'number', min: '0', max: '64', step: '1', value: '0' }) as HTMLInputElement;
   const inkIn = h('input', { type: 'color', value: '#000000' }) as HTMLInputElement;
+  const outlineCb = h('input', { type: 'checkbox' }) as HTMLInputElement;
+  const cropCb = h('input', { type: 'checkbox' }) as HTMLInputElement;
+  cropCb.checked = true;
+  const overflowNote = h('p', { class: 'warn' });
   const btnPng = h('button', { class: 'primary' }, '下載 PNG'), btnSvg = h('button', {}, '下載 SVG');
   const preview = h('div', { class: 'preview-list' });
   exportBox.append(
@@ -135,8 +155,11 @@ export function mountApp(root: HTMLElement) {
     h('div', { class: 'field' }, h('label', {}, '背景色'), bgIn),
     h('div', { class: 'field' }, h('label', {}, '邊距（格）'), marginIn),
     h('div', { class: 'field' }, h('label', {}, '線條顏色'), inkIn),
+    h('label', { class: 'check' }, outlineCb, '線條轉成輪廓並聯集（交會處無接縫，SVG 為純填色）'),
+    h('label', { class: 'check' }, cropCb, '裁切到畫布（取消時保留落在邊距裡的部分）'),
+    overflowNote,
     h('div', { class: 'tools-row' }, btnPng, btnSvg),
-    h('p', { class: 'note' }, '只輸出畫布範圍，畫布外的部分會裁掉。選多個尺寸時打包成一個 zip。'),
+    h('p', { class: 'note' }, '選多個尺寸時打包成一個 zip。'),
     h('div', { class: 'section-title' }, '匯出預覽（實際像素）'), preview,
   );
 
@@ -150,9 +173,9 @@ export function mountApp(root: HTMLElement) {
   propsBody.append(
     styleTitle,
     h('div', { class: 'field' }, h('label', {}, '線寬（格）'), widthIn),
-    h('div', { class: 'field' }, h('label', {}, '端點收尾'), capSel),
-    h('div', { class: 'field' }, h('label', {}, '接合'), joinSel),
-    h('div', { class: 'field' }, h('label', {}, 'Miter limit'), miterIn),
+    h('div', { class: 'field' }, h('label', {}, '線端與轉角'), cornerSel),
+    h('div', { class: 'field', id: 'miter-field' }, h('label', {}, 'Miter limit'), miterIn),
+    h('p', { class: 'note' }, '線的兩端和轉角用同一種樣式：圓角、尖角或斜切。'),
     selBox,
     h('div', { class: 'section-title' }, '怎麼做出圓弧'),
     h('p', { class: 'note' }, '先畫圓，再用直線或輔助線穿過它切開，然後用「選取」點不要的那一段，按「只刪這一段」。'),
@@ -268,8 +291,13 @@ export function mountApp(root: HTMLElement) {
     if (v >= 1) editor.setStyle({ width: v });
     else refresh();
   };
-  capSel.onchange = () => editor.setStyle({ cap: capSel.value as Cap });
-  joinSel.onchange = () => editor.setStyle({ join: joinSel.value as Join });
+  const setCorner = (v: Corner) => {
+    const c = CORNERS.find((x) => x.v === v)!;
+    editor.setStyle({ cap: c.cap, join: c.join });
+  };
+  cornerSel.onchange = () => setCorner(cornerSel.value as Corner);
+  for (const [v, b] of cornerBtns) b.onclick = () => setCorner(v);
+  moreBtn.onclick = () => { more.classList.toggle('open'); moreBtn.classList.toggle('on', more.classList.contains('open')); };
   miterIn.onchange = () => {
     const v = Number(miterIn.value);
     if (v >= 1) editor.setStyle({ miterLimit: v });
@@ -279,12 +307,28 @@ export function mountApp(root: HTMLElement) {
   const exportOpts = (): ExportOptions => ({
     transparent: transparentCb.checked, background: bgIn.value,
     margin: Math.max(0, Math.round(Number(marginIn.value) || 0)), ink: inkIn.value,
+    outline: outlineCb.checked, crop: cropCb.checked,
   });
+  function updateOverflow() {
+    const o = overflow(editor.project, editor.graph, editor.faceColors);
+    editor.overflowing = !!o;
+    editor.redraw();
+    if (!o) { overflowNote.textContent = ''; overflowNote.hidden = true; return; }
+    const f = (n: number) => (Math.round(n * 100) / 100).toString();
+    const sides = [['左', o.left], ['右', o.right], ['上', o.top], ['下', o.bottom]].filter(([, v]) => (v as number) > 1e-6)
+      .map(([k, v]) => `${k} ${f(v as number)} 格`).join('、');
+    const opts = exportOpts();
+    overflowNote.hidden = false;
+    overflowNote.textContent = `線條（含線端、轉角）或填色超出畫布：${sides}。` + (opts.crop
+      ? `匯出時會被裁掉；要保留的話，取消「裁切到畫布」並把邊距設為至少 ${o.margin} 格。`
+      : opts.margin >= o.margin ? '目前的邊距放得下。' : `邊距至少要 ${o.margin} 格才放得下，現在會被圖片邊緣切掉。`);
+  }
   const chosenSizes = () => [...sizeChecks].filter(([, cb]) => cb.checked).map(([n]) => n).sort((a, b) => a - b);
   let previewTimer = 0;
   function schedulePreview() {
     clearTimeout(previewTimer);
     previewTimer = window.setTimeout(() => {
+      updateOverflow();
       preview.innerHTML = '';
       for (const n of chosenSizes()) {
         const cv = renderPNG(editor.project, editor.graph, editor.faceColors, exportOpts(), n);
@@ -297,7 +341,7 @@ export function mountApp(root: HTMLElement) {
       if (!preview.children.length) preview.append(h('p', { class: 'note' }, '先勾選尺寸'));
     }, 250);
   }
-  for (const el of [transparentCb, bgIn, marginIn, inkIn]) el.addEventListener('input', schedulePreview);
+  for (const el of [transparentCb, bgIn, marginIn, inkIn, outlineCb, cropCb]) el.addEventListener('input', schedulePreview);
   customAdd.onclick = () => {
     const n = Math.round(Number(customIn.value));
     if (!(n >= 1 && n <= 4096)) return alert('請輸入 1–4096 的整數');
@@ -349,14 +393,14 @@ export function mountApp(root: HTMLElement) {
     wVal.textContent = `${st.width} 格`;
     wDec.disabled = st.width <= 1;
     widthStep.title = sel ? '調整選取線段的線寬' : '調整接下來要畫的線寬';
-    capSel.value = st.cap;
-    joinSel.value = st.join;
+    cornerSel.value = cornerOf(st.join);
+    for (const [v, b] of cornerBtns) b.classList.toggle('on', v === cornerOf(st.join));
     miterIn.value = String(st.miterLimit);
-    miterIn.disabled = st.join !== 'miter';
+    miterIn.closest('.field')!.toggleAttribute('hidden', st.join !== 'miter');
     guideBtn.classList.toggle('on', sel ? sel.guide : editor.guideMode);
     guideBtn.firstElementChild!.textContent = sel ? (sel.guide ? '改回一般線' : '改成輔助線') : '輔助線';
     selBox.hidden = !sel;
-    mDelete.disabled = !sel;
+    selRow.hidden = !sel;
     mErase.disabled = editor.selectedPiece === null;
     btnErase.disabled = editor.selectedPiece === null;
     btnRestore.hidden = !editor.selectedHasErased;
@@ -372,6 +416,7 @@ export function mountApp(root: HTMLElement) {
       lastExported = editor.project;
       schedulePreview();
     }
+    status.textContent = editor.hint + (editor.overflowing ? '（有內容超出畫布，見匯出）' : '');
   }
   editor.onChange = refresh;
   // development builds expose the editor for automated browser tests

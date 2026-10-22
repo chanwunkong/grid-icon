@@ -1,12 +1,33 @@
 import type { Graph } from '../exact/graph';
 import type { Project } from '../model/types';
-import { buildStrokes, junctionDots, paintIcon, strokePath, SvgPath, traceCycle, type Mapper } from '../view/paint';
+import { buildStrokes, junctionDots, paintFills, paintIcon, strokePath, SvgPath, traceCycle, type Mapper } from '../view/paint';
+import { contentBounds, outlineUnion, traceOutline } from '../view/outline';
 
 export interface ExportOptions {
   transparent: boolean;
   background: string;
   margin: number; // grid units around the canvas
   ink: string; // line colour
+  outline: boolean; // strokes as one united filled outline (no seams, pure-fill SVG)
+  crop: boolean; // cut everything outside the canvas; off = keep what falls in the margin
+}
+
+export interface Overflow {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  margin: number; // smallest whole-grid margin that keeps everything
+}
+
+/** How far the drawn content (stroke outlines incl. caps and joins, fills) reaches past the canvas. */
+export function overflow(project: Project, g: Graph, faceColors: Map<number, string>): Overflow | null {
+  const b = contentBounds(project.curves, g, faceColors.keys());
+  if (!b) return null;
+  const { w, h } = project.grid, eps = 1e-6;
+  const o = { left: Math.max(0, -b.x0), top: Math.max(0, -b.y0), right: Math.max(0, b.x1 - w), bottom: Math.max(0, b.y1 - h) };
+  const most = Math.max(o.left, o.top, o.right, o.bottom);
+  return most > eps ? { ...o, margin: Math.ceil(most - eps) } : null;
 }
 
 export const DEFAULT_SIZES = [16, 24, 32, 48, 64, 128, 256, 512];
@@ -32,14 +53,24 @@ export function renderPNG(project: Project, g: Graph, faceColors: Map<number, st
     ctx.fillStyle = opts.background;
     ctx.fillRect(0, 0, width, height);
   }
-  // only the canvas itself is exported; anything drawn outside it is cropped
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(m.ox, m.oy, project.grid.w * m.s, project.grid.h * m.s);
-  ctx.clip();
-  // odd pixel widths sit on pixel centres when shifted half a pixel, so they stay sharp
-  const nudge = pixelAligned(m.s) ? (wpx: number) => (Math.round(wpx) % 2 === 1 ? 0.5 : 0) : undefined;
-  paintIcon(ctx, project.curves, g, faceColors, m, opts.ink, nudge);
+  if (opts.crop) {
+    // only the canvas itself is exported; anything drawn outside it is cut off
+    ctx.beginPath();
+    ctx.rect(m.ox, m.oy, project.grid.w * m.s, project.grid.h * m.s);
+    ctx.clip();
+  }
+  if (opts.outline) {
+    paintFills(ctx, g, faceColors, m);
+    ctx.beginPath();
+    traceOutline(ctx, outlineUnion(project.curves, g), m);
+    ctx.fillStyle = opts.ink;
+    ctx.fill('nonzero');
+  } else {
+    // odd pixel widths sit on pixel centres when shifted half a pixel, so they stay sharp
+    const nudge = pixelAligned(m.s) ? (wpx: number) => (Math.round(wpx) % 2 === 1 ? 0.5 : 0) : undefined;
+    paintIcon(ctx, project.curves, g, faceColors, m, opts.ink, nudge);
+  }
   ctx.restore();
   return cv;
 }
@@ -58,14 +89,22 @@ export function renderSVG(project: Project, g: Graph, faceColors: Map<number, st
   const m: Mapper = { s: 1, ox: mg, oy: mg };
   const out: string[] = [];
   out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(W * k)}" height="${Math.round(H * k)}" viewBox="0 0 ${W} ${H}">`);
-  out.push(`<defs><clipPath id="canvas"><rect x="${mg}" y="${mg}" width="${w}" height="${h}"/></clipPath></defs>`);
+  if (opts.crop) out.push(`<defs><clipPath id="canvas"><rect x="${mg}" y="${mg}" width="${w}" height="${h}"/></clipPath></defs>`);
   if (!opts.transparent) out.push(`<rect width="${W}" height="${H}" fill="${esc(opts.background)}"/>`);
-  out.push('<g clip-path="url(#canvas)">');
+  out.push(opts.crop ? '<g clip-path="url(#canvas)">' : '<g>');
   for (const [face, color] of faceColors) {
     const p = new SvgPath();
     traceCycle(p, g, face, m);
     for (const hole of g.holes(face)) traceCycle(p, g, hole, m);
     out.push(`<path d="${p}" fill="${esc(color)}" fill-rule="nonzero"/>`);
+  }
+  if (opts.outline) {
+    // pure fills: the united outline of every stroke, one path
+    const p = new SvgPath();
+    traceOutline(p, outlineUnion(project.curves, g), m);
+    if (p.d.length) out.push(`<path d="${p}" fill="${esc(opts.ink)}" fill-rule="nonzero"/>`);
+    out.push('</g></svg>');
+    return out.join('\n');
   }
   for (const st of buildStrokes(project.curves, g)) {
     const p = new SvgPath();

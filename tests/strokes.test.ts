@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Graph } from '../src/exact/graph';
 import { buildStrokes, junctionDots } from '../src/view/paint';
-import { layout, pixelAligned, renderSVG, zip } from '../src/export/export';
+import { layout, overflow, pixelAligned, renderSVG, zip } from '../src/export/export';
 import { newProject } from '../src/model/project';
 import type { Cap, Curve, Style } from '../src/model/types';
 
@@ -21,8 +21,14 @@ describe('stroke chaining', () => {
     expect(strokes[0].steps).toHaveLength(4);
   });
 
-  it('round caps are not chained', () => {
+  it('round caps are chained too, so a corner gets the join style', () => {
     const cs = [line(2, 2, 10, 2, st('round')), line(10, 2, 10, 10, st('round'))];
+    const strokes = buildStrokes(cs, new Graph(cs));
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].steps).toHaveLength(2);
+  });
+  it('different styles are not chained', () => {
+    const cs = [line(2, 2, 10, 2, st('butt', 2)), line(10, 2, 10, 10, st('butt', 3))];
     expect(buildStrokes(cs, new Graph(cs))).toHaveLength(2);
   });
 
@@ -73,11 +79,33 @@ describe('export', () => {
   it('writes real SVG arcs, clipped to the canvas', () => {
     const p = newProject(24, 24);
     p.curves.push(circle(12, 12, 20, 12, st('round')));
-    const svg = renderSVG(p, new Graph(p.curves), new Map(), { transparent: true, background: '#fff', margin: 2, ink: '#000' });
+    const svg = renderSVG(p, new Graph(p.curves), new Map(), { transparent: true, background: '#fff', margin: 2, ink: '#000', outline: false, crop: true });
     expect(svg).toContain('viewBox="0 0 28 28"');
     expect(svg).toContain('clip-path="url(#canvas)"');
     expect(svg.match(/A8 8 0 0 1/g)).toHaveLength(2); // a full circle as two half arcs
     expect(svg).toContain('stroke-linecap="round"');
+  });
+
+  it('outline mode writes one filled path and no strokes', () => {
+    const p = newProject(24, 24);
+    p.curves.push(line(4, 12, 20, 12, st('butt')), line(12, 4, 12, 20, st('butt')), circle(12, 12, 18, 12, st('round')));
+    const svg = renderSVG(p, new Graph(p.curves), new Map(), { transparent: true, background: '#fff', margin: 0, ink: '#000', outline: true, crop: true });
+    expect(svg.match(/<path /g)).toHaveLength(1);
+    expect(svg).not.toContain('stroke=');
+    expect(svg).not.toContain('<circle');
+  });
+
+  it('measures how far caps and lines reach past the canvas', () => {
+    const p = newProject(24, 24);
+    p.curves.push(line(0, 12, 24, 12, st('butt', 2)));
+    expect(overflow(p, new Graph(p.curves), new Map())).toBeNull(); // butt ends stop at the edge
+    p.curves[0] = line(0, 12, 24, 12, st('square', 2));
+    const o = overflow(p, new Graph(p.curves), new Map())!;
+    expect(o.left).toBeCloseTo(1, 3); // half the width beyond each end
+    expect(o.right).toBeCloseTo(1, 3);
+    expect(o.margin).toBe(1);
+    p.curves[0] = line(12, 0, 12, 24, st('round', 4));
+    expect(overflow(p, new Graph(p.curves), new Map())!.margin).toBe(2);
   });
 
   it('builds a valid stored zip', async () => {
