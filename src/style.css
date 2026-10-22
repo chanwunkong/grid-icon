@@ -12,7 +12,7 @@
   background: var(--bg);
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; }
+html, body { margin: 0; height: 100%; overscroll-behavior: none; touch-action: manipulation; }
 body { background: var(--bg); }
 button, input, select { font: inherit; color: inherit; }
 button {
@@ -24,7 +24,12 @@ button:disabled { opacity: 0.4; cursor: default; }
 button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-.layout { display: grid; grid-template-columns: 180px 1fr 280px; grid-template-rows: auto 1fr; height: 100vh; }
+.layout { display: grid; grid-template-columns: 180px 1fr 280px; grid-template-rows: auto 1fr; position: fixed; inset: 0; }
+/* a button over the canvas that always brings the drawing back: centred, fitted to the view */
+.recenter {
+  position: absolute; right: 10px; bottom: 10px; z-index: 2; padding: 8px 12px; border-radius: 20px;
+  background: rgba(255, 255, 255, 0.92); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); font-weight: 600;
+}
 .topbar {
   grid-column: 1 / -1; display: flex; gap: 8px; align-items: center;
   padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
@@ -71,11 +76,11 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
 
 /* ---- phones ---- */
 .mobile-only { display: none !important; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) {
   .mobile-only { display: inline-flex !important; }
   p.mobile-only { display: block !important; }
   .desktop-only { display: none !important; }
-  .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; height: 100dvh; }
+  .layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; }
   .topbar { gap: 6px; padding: 6px 8px; overflow-x: auto; padding-top: calc(6px + env(safe-area-inset-top)); }
   .topbar h1, .topbar .info { display: none; }
   .topbar .spacer { display: none; }
@@ -119,7 +124,7 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
 .width-step button { padding: 4px 10px; }
 .width-step .wval { min-width: 40px; text-align: center; font-weight: 600; }
 .width-step .wlabel { font-size: 12px; color: var(--mute); margin-right: 2px; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) {
   .width-step { margin: 0 4px; flex: none; }
   .width-step button { min-height: 40px; }
 }
@@ -127,7 +132,7 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
 .fill-box { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
 .fill-box[hidden] { display: none; }
 .fill-box input[type=color] { width: 44px; height: 34px; padding: 0 2px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
-@media (max-width: 760px) { .fill-box { margin: 0 4px; flex: none; } .fill-box button { min-height: 40px; } }
+@media (max-width: 760px), (max-height: 500px) { .fill-box { margin: 0 4px; flex: none; } .fill-box button { min-height: 40px; } }
 .size-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 8px; }
 .tools-row input[type=number] { width: 110px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
 .field input[type=color] { height: 30px; padding: 0 2px; }
@@ -142,7 +147,7 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
 /* tool column pieces (desktop: stacked) */
 .tool-row, .more { display: flex; flex-direction: column; gap: 6px; }
 .mobile-only-flex { display: none !important; }
-@media (max-width: 760px) { .mobile-only-flex { display: flex !important; } }
+@media (max-width: 760px), (max-height: 500px) { .mobile-only-flex { display: flex !important; } }
 .mobile-only-flex[hidden] { display: none !important; }
 .corner-label { margin-top: 6px; }
 .corner-seg button { padding: 6px 4px; }

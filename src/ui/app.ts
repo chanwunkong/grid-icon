@@ -127,8 +127,9 @@ export function mountApp(root: HTMLElement) {
   extra.append(h('p', { class: 'note desktop-only' }, '滾輪縮放；按住空白鍵拖曳、或用滑鼠中鍵／右鍵拖曳來平移。'));
   extra.append(h('p', { class: 'note mobile-only' }, '單指按住可以移動調整，放開才放下格點；雙指捏合縮放、拖曳平移。'));
 
+  const recenter = h('button', { class: 'recenter', title: '置中並調整到適合的大小（F）' }, '⌖ 置中');
   const stage = h('main', { class: 'stage' },
-    h('div', { class: 'canvas-box' }, canvas),
+    h('div', { class: 'canvas-box' }, canvas, recenter),
     h('div', { class: 'status' }, status, cursorInfo));
 
   const props = h('aside', { class: 'props' });
@@ -229,7 +230,7 @@ export function mountApp(root: HTMLElement) {
   root.append(layout);
 
   // phones: the left column's settings live at the top of the slide-up sheet
-  const phone = window.matchMedia('(max-width: 760px)');
+  const phone = window.matchMedia('(max-width: 760px), (max-height: 500px)');
   const place = () => {
     if (phone.matches) propsBody.before(extra);
     else tools.append(extra);
@@ -328,6 +329,9 @@ export function mountApp(root: HTMLElement) {
   zIn.onclick = () => editor.zoom(1.25);
   zOut.onclick = () => editor.zoom(0.8);
   zFit.onclick = () => { editor.fit(); refresh(); };
+  recenter.onclick = () => { editor.fit(); refresh(); };
+  // turning the phone changes the whole view: fit the drawing again once the layout has settled
+  screen.orientation?.addEventListener('change', () => setTimeout(() => { editor.fit(); refresh(); }, 250));
 
   widthIn.onchange = () => {
     const v = Math.round(Number(widthIn.value));

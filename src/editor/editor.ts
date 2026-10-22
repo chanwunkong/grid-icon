@@ -469,7 +469,8 @@ export class Editor {
   private resize() {
     const box = this.canvas.parentElement!.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    const first = this.cssW === 0;
+    // first layout, or the view turned between portrait and landscape: fit the drawing again
+    const first = this.cssW === 0 || (this.cssW > this.cssH) !== (box.width > box.height);
     this.cssW = box.width;
     this.cssH = box.height;
     this.canvas.width = Math.round(box.width * dpr);
