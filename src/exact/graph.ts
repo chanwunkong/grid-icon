@@ -85,6 +85,8 @@ export interface Half {
 export interface Cycle {
   id: number;
   halves: number[];
+  // float bounding box of the cycle, padded: points outside it have winding number 0 (a safe prefilter)
+  box: { x0: number; y0: number; x1: number; y1: number };
   outer: boolean; // the outside boundary of a connected component (not a face)
   component: number;
 }
@@ -264,13 +266,40 @@ export class Graph {
   private buildCycles() {
     for (const h of this.halves) {
       if (h.cycle !== -1) continue;
-      const c: Cycle = { id: this.cycles.length, halves: [], outer: false, component: -1 };
+      const c: Cycle = { id: this.cycles.length, halves: [], outer: false, component: -1, box: { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity } };
       let cur = h.id;
       while (this.halves[cur].cycle === -1) {
         this.halves[cur].cycle = c.id;
         c.halves.push(cur);
         cur = this.halves[cur].next;
       }
+      for (const hid of c.halves) {
+        const hh = this.halves[hid], e = this.edges[hh.edge];
+        const grow = (x0: number, y0: number, x1: number, y1: number) => {
+          c.box.x0 = Math.min(c.box.x0, x0); c.box.y0 = Math.min(c.box.y0, y0);
+          c.box.x1 = Math.max(c.box.x1, x1); c.box.y1 = Math.max(c.box.y1, y1);
+        };
+        const v = this.vertices[hh.origin].f, t = this.vertices[hh.target].f;
+        grow(v.x, v.y, v.x, v.y);
+        grow(t.x, t.y, t.x, t.y);
+        if (e.geom.kind === 'circle') {
+          // the arc's own box: its ends plus the circle's extreme points that the arc passes
+          const { c } = e.geom, r = Math.sqrt(Number(e.geom.r2));
+          const from = this.vertices[e.from].f, to = this.vertices[e.to].f;
+          const a0 = Math.atan2(from.y - c.y, from.x - c.x);
+          let span = Math.atan2(to.y - c.y, to.x - c.x) - a0;
+          if (e.from === e.to) span = Math.PI * 2;
+          else span = ((span % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+          for (let k = 0; k < 4; k++) {
+            const ang = (k * Math.PI) / 2;
+            const off = (((ang - a0) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            // a small angular margin keeps the box safe against rounding near an extreme point
+            if (off <= span + 1e-6 || off >= 2 * Math.PI - 1e-6) grow(c.x + r * Math.cos(ang), c.y + r * Math.sin(ang), c.x + r * Math.cos(ang), c.y + r * Math.sin(ang));
+          }
+        }
+      }
+      const pad = 1e-4 * (1 + Math.max(Math.abs(c.box.x0), Math.abs(c.box.x1), Math.abs(c.box.y0), Math.abs(c.box.y1)));
+      c.box = { x0: c.box.x0 - pad, y0: c.box.y0 - pad, x1: c.box.x1 + pad, y1: c.box.y1 + pad };
       this.cycles.push(c);
     }
   }
@@ -469,6 +498,9 @@ export class Graph {
 
   /** Winding number with the first non-degenerate ray; null if q is on the cycle. */
   windingAny(q: RPt, cycleId: number): number | null {
+    // outside the (padded) bounding box the winding number is 0: skip the exact work
+    const b = this.cycles[cycleId].box, fx = q.x.toNumber(), fy = q.y.toNumber();
+    if (fx < b.x0 || fx > b.x1 || fy < b.y0 || fy > b.y1) return 0;
     for (const d of Graph.DIRS) {
       const w = this.winding(q, cycleId, d);
       if (w !== null) return w;

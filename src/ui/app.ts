@@ -3,6 +3,7 @@ import { MAX_GRID, MIN_GRID, newProject, parseProject, serialize } from '../mode
 import type { Cap, Curve, Join } from '../model/types';
 import type { Keyline } from '../view/render';
 import { r2 } from '../model/geometry';
+import { importSvg } from '../import/svgImport';
 import { DEFAULT_SIZES, download, overflow, pngBlob, renderPNG, renderSVG, zip, type ExportOptions } from '../export/export';
 
 const TOOLS: { id: Tool; label: string; key: string }[] = [
@@ -251,6 +252,7 @@ export function mountApp(root: HTMLElement) {
     b.onclick = () => { wIn.value = hIn.value = String(n); };
     presets.append(b);
   }
+  const btnSvg2 = h('button', { type: 'button' }, '從 SVG 匯入…');
   const dlgErr = h('div', { class: 'error' });
   const dlgCancel = h('button', { type: 'button' }, '取消'), dlgOk = h('button', { type: 'button', class: 'primary' }, '建立');
   dlg.append(
@@ -259,6 +261,9 @@ export function mountApp(root: HTMLElement) {
     presets,
     h('div', { class: 'field' }, h('label', {}, '寬（格）'), wIn),
     h('div', { class: 'field' }, h('label', {}, '高（格）'), hIn),
+    h('div', { class: 'section-title', style: 'margin-top:14px' }, '或從 SVG 匯入'),
+    h('p', { class: 'note' }, '把填色的 SVG 自動轉成格點上的圓和直線（全部是輔助線），各區域用原本的顏色填色，原圖會設成底圖方便比對。格數用上面的設定；換個格數重新匯入就能比較。'),
+    h('div', { class: 'presets' }, btnSvg2),
     dlgErr,
     h('div', { class: 'dialog-actions' }, dlgCancel, dlgOk),
   );
@@ -294,6 +299,37 @@ export function mountApp(root: HTMLElement) {
     }
     dlg.close();
     editor.setProject(newProject(w, hh));
+  };
+
+  btnSvg2.onclick = () => {
+    const w = Number(wIn.value), hh = Number(hIn.value);
+    const ok = (n: number) => Number.isInteger(n) && n >= MIN_GRID && n <= MAX_GRID;
+    if (!ok(w) || !ok(hh)) { dlgErr.textContent = `寬和高都要是 ${MIN_GRID}–${MAX_GRID} 的整數`; return; }
+    const input = h('input', { type: 'file', accept: '.svg,image/svg+xml' }) as HTMLInputElement;
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (editor.project.curves.length && !confirm('匯入會取代目前的畫布（請先儲存），確定嗎？')) return;
+      dlgErr.textContent = '轉換中…（大的圖形或高格數可能要幾秒）';
+      btnSvg2.disabled = true;
+      await new Promise((r) => setTimeout(r, 30)); // let the message paint first
+      try {
+        const res = importSvg(await file.text(), w, hh);
+        dlg.close();
+        editor.setProject(res.project);
+        await editor.setReferenceImage(res.reference.src);
+        editor.updateReference({ x: res.reference.x, y: res.reference.y, w: res.reference.w, opacity: 0.35 });
+        alert(`已匯入 ${w}×${hh} 格：${res.curves} 條輔助線、${res.project.fills.length} 個填色區域。\n` +
+          `和原圖的最大偏差：${res.deviationPct.toFixed(2)}%（圖形大小的百分比）；轉角最多多彎 ${res.bend.toFixed(1)}°。\n` +
+          (res.skipped ? `有 ${res.skipped} 個外框太小或太細，在這個格數下無法封閉，已略過（試更高的格數）。\n` : '') +
+          '原圖已設成底圖（設定 → 底圖可以調透明度或隱藏）。');
+      } catch (err) {
+        dlgErr.textContent = `匯入失敗：${(err as Error).message}`;
+      } finally {
+        btnSvg2.disabled = false;
+      }
+    };
+    input.click();
   };
 
   btnNew.onclick = () => {
