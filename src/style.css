@@ -149,3 +149,4 @@ dialog h2 { margin: 0 0 12px; font-size: 16px; }
 .warn { color: #b35c00; background: #fff4e5; border: 1px solid #ffd8a8; border-radius: 6px; padding: 6px 8px; font-size: 12px; line-height: 1.5; }
 .warn[hidden] { display: none; }
 [hidden] { display: none !important; }
+.field input[type=range] { padding: 0; border: 0; }

@@ -3,6 +3,7 @@ import { r2 } from '../model/geometry';
 import { reach } from '../model/project';
 import type { Graph } from '../exact/graph';
 import { paintIcon, tracePiece, type Mapper } from './paint';
+import type { Reference } from '../editor/editor';
 import type { Viewport } from './viewport';
 
 export type Keyline = 'circle' | 'square' | 'portrait' | 'landscape';
@@ -19,6 +20,7 @@ export interface Scene {
   graph: Graph;
   faceColors: Map<number, string>;
   overflowing: boolean; // content reaches past the canvas: warn with the border
+  reference: Reference | null; // tracing image, drawn under the grid
   hover: Pt | null; // snapped grid point under the mouse
   marks: Pt[]; // points already clicked for the shape being drawn
   preview: Curve | null;
@@ -159,6 +161,15 @@ export function render(ctx: CanvasRenderingContext2D, s: Scene) {
   const o = vp.toScreen(0, 0);
   ctx.fillStyle = COLORS.board;
   ctx.fillRect(o.x, o.y, w * vp.scale, h * vp.scale);
+  const ref = s.reference;
+  if (ref && ref.visible) {
+    const p = vp.toScreen(ref.x, ref.y), wpx = ref.w * vp.scale;
+    ctx.save();
+    ctx.globalAlpha = ref.opacity;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(ref.img, p.x, p.y, wpx, (wpx * ref.img.naturalHeight) / ref.img.naturalWidth);
+    ctx.restore();
+  }
   if (s.showGrid) drawGrid(ctx, s);
   ctx.strokeStyle = s.overflowing ? '#f08c00' : COLORS.border;
   ctx.lineWidth = s.overflowing ? 2 : 1;

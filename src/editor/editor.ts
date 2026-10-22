@@ -13,6 +13,21 @@ import { Viewport } from '../view/viewport';
 export type Tool = 'line' | 'circle' | 'select' | 'fill';
 
 const AUTOSAVE_KEY = 'grid-icon:autosave';
+const REFERENCE_KEY = 'grid-icon:reference';
+
+/**
+ * A reference image under the grid, for tracing. Placed in grid units; never exported and not part
+ * of the project file (it is kept only in this browser).
+ */
+export interface Reference {
+  src: string; // data URL
+  img: HTMLImageElement;
+  x: number; // top-left, grid units
+  y: number;
+  w: number; // width in grid units (height follows the image's aspect ratio)
+  opacity: number;
+  visible: boolean;
+}
 
 /** A rational close to a float (1/1024 of a grid unit), for points picked by tapping. */
 const dyadic = (v: number) => new Q(BigInt(Math.round(v * 1024)), 1024n);
@@ -33,6 +48,9 @@ export class Editor {
   graph!: Graph; // exact planar graph of the current geometry
   faceColors = new Map<number, string>();
   overflowing = false; // drawn content reaches past the canvas (set by the export panel)
+  reference: Reference | null = null;
+  adjustingReference = false; // drags move the reference image instead of drawing
+  private refDrag: { x: number; y: number } | null = null;
   showGrid = true;
   keylines = new Set<Keyline>();
   onChange: () => void = () => {};
@@ -212,6 +230,70 @@ export class Editor {
     this.changed();
   }
 
+  // ------------------------------------------------------------------ reference image
+
+  /** Load an image as the tracing reference, fitted inside the canvas. */
+  async setReferenceImage(src: string) {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    this.reference = { src, img, x: 0, y: 0, w: 1, opacity: 0.4, visible: true };
+    this.fitReference();
+  }
+
+  fitReference() {
+    const r = this.reference;
+    if (!r) return;
+    const { w, h } = this.project.grid, aspect = r.img.naturalHeight / r.img.naturalWidth;
+    r.w = Math.min(w, h / aspect);
+    r.x = (w - r.w) / 2;
+    r.y = (h - r.w * aspect) / 2;
+    this.referenceChanged();
+  }
+
+  updateReference(patch: Partial<Omit<Reference, 'img' | 'src'>>) {
+    if (!this.reference) return;
+    Object.assign(this.reference, patch);
+    this.referenceChanged();
+  }
+
+  removeReference() {
+    this.reference = null;
+    this.adjustingReference = false;
+    this.referenceChanged();
+  }
+
+  private referenceChanged() {
+    try {
+      const r = this.reference;
+      if (r) localStorage.setItem(REFERENCE_KEY, JSON.stringify({ src: r.src, x: r.x, y: r.y, w: r.w, opacity: r.opacity, visible: r.visible }));
+      else localStorage.removeItem(REFERENCE_KEY);
+    } catch {
+      /* too large for storage, or storage unavailable: the reference just won't survive a reload */
+    }
+    this.redraw();
+    this.onChange();
+  }
+
+  /** Bring back the reference image saved in this browser, if any. */
+  async restoreReference() {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(REFERENCE_KEY);
+    } catch {
+      return;
+    }
+    if (!saved) return;
+    try {
+      const r = JSON.parse(saved);
+      await this.setReferenceImage(r.src);
+      Object.assign(this.reference!, { x: r.x, y: r.y, w: r.w, opacity: r.opacity, visible: r.visible });
+      this.referenceChanged();
+    } catch {
+      /* ignore a broken saved reference */
+    }
+  }
+
   // ------------------------------------------------------------------ tools
 
   setTool(t: Tool) {
@@ -251,6 +333,7 @@ export class Editor {
   /** Hint shown under the canvas for the current step of the current tool. */
   get hint(): string {
     if (this.notice) return this.notice;
+    if (this.adjustingReference && this.reference) return '調整底圖：拖曳移動底圖；縮放用設定裡的數值。完成後關掉「調整底圖」';
     switch (this.tool) {
       case 'line':
         return `${this.guideMode ? '輔助線' : '直線'}：在起點按下，拖到終點放開`;
@@ -313,8 +396,12 @@ export class Editor {
   }
 
   /** Pointer pressed: the start of a drag (drawing tools) or a tap (select). */
-  private press(p: Pt, touch: boolean) {
+  private press(p: Pt, touch: boolean, sx = 0, sy = 0) {
     this.notice = '';
+    if (this.adjustingReference && this.reference) {
+      this.refDrag = { x: sx, y: sy };
+      return;
+    }
     if (this.tool === 'select' || this.tool === 'fill') return;
     this.marksBeforeDrag = this.marks;
     this.dragging = true;
@@ -326,6 +413,11 @@ export class Editor {
   }
 
   private release(p: Pt, sx: number, sy: number, touch: boolean) {
+    if (this.refDrag) {
+      this.refDrag = null;
+      this.referenceChanged();
+      return;
+    }
     if (this.tool === 'select') {
       this.pick(sx, sy, touch);
       this.redraw();
@@ -353,6 +445,7 @@ export class Editor {
 
   /** A second finger or a cancelled pointer: forget the drag in progress. */
   private abortDrag() {
+    this.refDrag = null;
     if (!this.dragging) return;
     this.dragging = false;
     this.marks = this.marksBeforeDrag;
@@ -397,6 +490,7 @@ export class Editor {
         project: this.project, vp: this.vp, width: this.cssW, height: this.cssH,
         showGrid: this.showGrid, keylines: this.keylines, selectedId: this.selectedId,
         graph: this.graph, faceColors: this.faceColors, selectedPiece: this.selectedPiece, overflowing: this.overflowing,
+        reference: this.reference,
         hover: this.tool === 'select' || this.tool === 'fill' ? null : this.hover,
         marks: this.marks, preview: this.dragging ? preview : null,
         guide: this.dragging ? this.hover : null, guideTouch: this.dragTouch,
@@ -431,7 +525,7 @@ export class Editor {
         if (touches.size === 1) {
           tap = q;
           this.hover = this.snap(q.x, q.y);
-          this.press(this.hover, true);
+          this.press(this.hover, true, q.x, q.y);
         } else {
           tap = null; // a second finger turns the touch into a pan / zoom gesture
           this.abortDrag();
@@ -449,7 +543,7 @@ export class Editor {
       }
       if (e.button === 0) {
         this.hover = this.snap(q.x, q.y);
-        this.press(this.hover, false);
+        this.press(this.hover, false, q.x, q.y);
       }
     });
     c.addEventListener('pointermove', (e) => {
@@ -466,6 +560,7 @@ export class Editor {
           this.onChange();
         } else if (tap) {
           tap = q;
+          if (this.moveReference(q)) return;
           this.hover = this.snap(q.x, q.y);
         }
         this.redraw();
@@ -475,7 +570,7 @@ export class Editor {
         this.vp.ox += q.x - this.pan.x;
         this.vp.oy += q.y - this.pan.y;
         this.pan = q;
-      } else {
+      } else if (!this.moveReference(q)) {
         this.hover = this.snap(q.x, q.y);
       }
       this.redraw();
@@ -516,6 +611,17 @@ export class Editor {
       this.redraw();
       this.onChange();
     }, { passive: false });
+  }
+
+  /** While adjusting the reference: drag it along. Returns true when the move was used for that. */
+  private moveReference(q: { x: number; y: number }): boolean {
+    if (!this.refDrag || !this.reference) return false;
+    this.reference.x += (q.x - this.refDrag.x) / this.vp.scale;
+    this.reference.y += (q.y - this.refDrag.y) / this.vp.scale;
+    this.refDrag = q;
+    this.redraw();
+    this.onChange();
+    return true;
   }
 
   private bindKeys() {

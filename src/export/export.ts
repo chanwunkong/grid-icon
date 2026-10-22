@@ -1,6 +1,6 @@
 import type { Graph } from '../exact/graph';
 import type { Project } from '../model/types';
-import { buildStrokes, junctionDots, paintFills, paintIcon, strokePath, SvgPath, traceCycle, type Mapper } from '../view/paint';
+import { buildStrokes, facesByColor, junctionDots, paintFills, paintIcon, strokePath, SvgPath, traceCycle, type Mapper } from '../view/paint';
 import { contentBounds, outlineUnion, traceOutline } from '../view/outline';
 
 export interface ExportOptions {
@@ -92,10 +92,12 @@ export function renderSVG(project: Project, g: Graph, faceColors: Map<number, st
   if (opts.crop) out.push(`<defs><clipPath id="canvas"><rect x="${mg}" y="${mg}" width="${w}" height="${h}"/></clipPath></defs>`);
   if (!opts.transparent) out.push(`<rect width="${W}" height="${H}" fill="${esc(opts.background)}"/>`);
   out.push(opts.crop ? '<g clip-path="url(#canvas)">' : '<g>');
-  for (const [face, color] of faceColors) {
+  for (const [color, faces] of facesByColor(faceColors)) {
     const p = new SvgPath();
-    traceCycle(p, g, face, m);
-    for (const hole of g.holes(face)) traceCycle(p, g, hole, m);
+    for (const face of faces) {
+      traceCycle(p, g, face, m);
+      for (const hole of g.holes(face)) traceCycle(p, g, hole, m);
+    }
     out.push(`<path d="${p}" fill="${esc(color)}" fill-rule="nonzero"/>`);
   }
   if (opts.outline) {

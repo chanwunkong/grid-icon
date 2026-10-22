@@ -71,12 +71,28 @@ export function traceCycle(sink: PathSink, g: Graph, cycle: number, m: Mapper) {
   sink.closePath();
 }
 
-/** Fill every coloured face (outer boundary plus holes; holes wind the other way, so nonzero works). */
-export function paintFills(ctx: CanvasRenderingContext2D, g: Graph, faceColors: Map<number, string>, m: Mapper) {
+/** Faces grouped by colour: neighbouring faces of one colour are filled as one path, so no seam shows. */
+export function facesByColor(faceColors: Map<number, string>): Map<string, number[]> {
+  const out = new Map<string, number[]>();
   for (const [face, color] of faceColors) {
+    if (!out.has(color)) out.set(color, []);
+    out.get(color)!.push(face);
+  }
+  return out;
+}
+
+/**
+ * Fill every coloured face (outer boundary plus holes; holes wind the other way, so nonzero works).
+ * All faces of one colour go into a single path: shared edges are traced in opposite directions,
+ * so they cancel instead of leaving an anti-aliased hairline between neighbours.
+ */
+export function paintFills(ctx: CanvasRenderingContext2D, g: Graph, faceColors: Map<number, string>, m: Mapper) {
+  for (const [color, faces] of facesByColor(faceColors)) {
     ctx.beginPath();
-    traceCycle(ctx, g, face, m);
-    for (const hole of g.holes(face)) traceCycle(ctx, g, hole, m);
+    for (const face of faces) {
+      traceCycle(ctx, g, face, m);
+      for (const hole of g.holes(face)) traceCycle(ctx, g, hole, m);
+    }
     ctx.fillStyle = color;
     ctx.fill('nonzero');
   }

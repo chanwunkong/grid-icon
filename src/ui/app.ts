@@ -42,6 +42,27 @@ function describe(c: Curve): string {
   return `${kind} 圓心 ${fmtPt(c.c)}，經過 ${fmtPt(c.p)}，r² = ${r2(c.c, c.p)}`;
 }
 
+/** Read an image file as a data URL, scaled down so it fits in browser storage (long side ≤ 1600 px). */
+async function imageForStorage(file: File): Promise<string> {
+  const url = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+  if (file.type === 'image/svg+xml') return url; // vector: keep as is
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+  if (k === 1 && file.size < 1_500_000) return url;
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(img.naturalWidth * k);
+  cv.height = Math.round(img.naturalHeight * k);
+  cv.getContext('2d')!.drawImage(img, 0, 0, cv.width, cv.height);
+  return cv.toDataURL('image/png');
+}
+
 export function mountApp(root: HTMLElement) {
   root.innerHTML = '';
   const canvas = h('canvas');
@@ -88,7 +109,8 @@ export function mountApp(root: HTMLElement) {
     cornerSeg.append(b);
   }
   const mCancel = h('button', { class: 'mobile-only' }, '取消');
-  const more = h('div', { class: 'more' }, guideBtn, widthStep, h('div', { class: 'wlabel corner-label' }, '線端與轉角'), cornerSeg, mCancel);
+  const mRefAdjust = h('button', { class: 'mobile-only' }, '調整底圖');
+  const more = h('div', { class: 'more' }, guideBtn, widthStep, h('div', { class: 'wlabel corner-label' }, '線端與轉角'), cornerSeg, mRefAdjust, mCancel);
   tools.append(toolRow, selRow, fillBox, more, extra);
   const gridCheck = h('input', { type: 'checkbox' }) as HTMLInputElement;
   gridCheck.checked = true;
@@ -163,6 +185,26 @@ export function mountApp(root: HTMLElement) {
     h('div', { class: 'section-title' }, '匯出預覽（實際像素）'), preview,
   );
 
+  // ---- reference image (tracing)
+  const refBox = h('div');
+  const btnRefLoad = h('button', {}, '匯入底圖'), btnRefFit = h('button', {}, '符合畫布'), btnRefRemove = h('button', {}, '移除');
+  const btnRefAdjust = h('button', { title: '開啟時，拖曳會移動底圖而不是畫線' }, '調整底圖');
+  const refShow = h('input', { type: 'checkbox' }) as HTMLInputElement;
+  const refOpacity = h('input', { type: 'range', min: '0.05', max: '1', step: '0.05' }) as HTMLInputElement;
+  const refW = h('input', { type: 'number', step: '0.1', min: '0.1' }) as HTMLInputElement;
+  const refX = h('input', { type: 'number', step: '0.1' }) as HTMLInputElement;
+  const refY = h('input', { type: 'number', step: '0.1' }) as HTMLInputElement;
+  const refControls = h('div', {},
+    h('label', { class: 'check' }, refShow, '顯示底圖'),
+    h('div', { class: 'field' }, h('label', {}, '透明度'), refOpacity),
+    h('div', { class: 'field' }, h('label', {}, '寬度（格）'), refW),
+    h('div', { class: 'field' }, h('label', {}, 'X（格）'), refX),
+    h('div', { class: 'field' }, h('label', {}, 'Y（格）'), refY),
+    h('div', { class: 'tools-row' }, btnRefAdjust, btnRefFit, btnRefRemove));
+  refBox.append(h('div', { class: 'section-title' }, '底圖（描圖用）'),
+    h('div', { class: 'tools-row' }, btnRefLoad), refControls,
+    h('p', { class: 'note' }, '把參考圖片疊在畫布下面描圖。底圖不會匯出，也不會存進專案檔，只留在這個瀏覽器。'));
+
   const selBox = h('div');
   const selInfo = h('div', { class: 'coords' });
   const btnErase = h('button', { title: 'Delete' }, '只刪這一段'), btnDelete = h('button', { title: 'Shift+Delete' }, '刪除整條線');
@@ -177,6 +219,7 @@ export function mountApp(root: HTMLElement) {
     h('div', { class: 'field', id: 'miter-field' }, h('label', {}, 'Miter limit'), miterIn),
     h('p', { class: 'note' }, '線的兩端和轉角用同一種樣式：圓角、尖角或斜切。'),
     selBox,
+    refBox,
     h('div', { class: 'section-title' }, '怎麼做出圓弧'),
     h('p', { class: 'note' }, '先畫圓，再用直線或輔助線穿過它切開，然後用「選取」點不要的那一段，按「只刪這一段」。'),
     exportBox,
@@ -364,6 +407,37 @@ export function mountApp(root: HTMLElement) {
     download(new Blob([svg], { type: 'image/svg+xml' }), 'icon.svg');
   };
 
+  btnRefLoad.onclick = () => {
+    const input = h('input', { type: 'file', accept: 'image/*' }) as HTMLInputElement;
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        await editor.setReferenceImage(await imageForStorage(file));
+      } catch {
+        alert('無法讀取這張圖片');
+      }
+    };
+    input.click();
+  };
+  btnRefFit.onclick = () => editor.fitReference();
+  btnRefRemove.onclick = () => { if (confirm('移除底圖？')) editor.removeReference(); };
+  const toggleAdjust = () => { editor.adjustingReference = !editor.adjustingReference; refresh(); };
+  btnRefAdjust.onclick = toggleAdjust;
+  mRefAdjust.onclick = toggleAdjust;
+  refShow.onchange = () => editor.updateReference({ visible: refShow.checked });
+  refOpacity.oninput = () => editor.updateReference({ opacity: Number(refOpacity.value) });
+  const num = (el: HTMLInputElement, key: 'w' | 'x' | 'y') => {
+    el.onchange = () => {
+      const v = Number(el.value);
+      if (Number.isFinite(v) && (key !== 'w' || v > 0)) editor.updateReference({ [key]: v });
+      else refresh();
+    };
+  };
+  num(refW, 'w');
+  num(refX, 'x');
+  num(refY, 'y');
+
   btnDelete.onclick = () => editor.deleteSelected();
   btnErase.onclick = () => editor.erasePiece();
   btnRestore.onclick = () => editor.restorePieces();
@@ -401,6 +475,19 @@ export function mountApp(root: HTMLElement) {
     guideBtn.firstElementChild!.textContent = sel ? (sel.guide ? '改回一般線' : '改成輔助線') : '輔助線';
     selBox.hidden = !sel;
     selRow.hidden = !sel;
+    const ref = editor.reference;
+    refControls.hidden = !ref;
+    btnRefLoad.textContent = ref ? '換一張底圖' : '匯入底圖';
+    mRefAdjust.hidden = !ref;
+    for (const b of [btnRefAdjust, mRefAdjust]) b.classList.toggle('on', editor.adjustingReference);
+    if (ref) {
+      refShow.checked = ref.visible;
+      refOpacity.value = String(ref.opacity);
+      const r1 = (v: number) => String(Math.round(v * 10) / 10);
+      if (document.activeElement !== refW) refW.value = r1(ref.w);
+      if (document.activeElement !== refX) refX.value = r1(ref.x);
+      if (document.activeElement !== refY) refY.value = r1(ref.y);
+    }
     mErase.disabled = editor.selectedPiece === null;
     btnErase.disabled = editor.selectedPiece === null;
     btnRestore.hidden = !editor.selectedHasErased;
@@ -419,6 +506,7 @@ export function mountApp(root: HTMLElement) {
     status.textContent = editor.hint + (editor.overflowing ? '（有內容超出畫布，見匯出）' : '');
   }
   editor.onChange = refresh;
+  editor.restoreReference();
   // development builds expose the editor for automated browser tests
   if (import.meta.env.DEV) (window as unknown as { __editor: Editor }).__editor = editor;
   refresh();
