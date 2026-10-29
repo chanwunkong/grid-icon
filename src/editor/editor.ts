@@ -9,6 +9,7 @@ import { distanceToPiece } from '../view/paint';
 import { newId, reach } from '../model/project';
 import { render, type Keyline, type Scene } from '../view/render';
 import { Viewport } from '../view/viewport';
+import { t } from '../i18n';
 
 export type Tool = 'line' | 'circle' | 'select' | 'fill';
 
@@ -333,16 +334,16 @@ export class Editor {
   /** Hint shown under the canvas for the current step of the current tool. */
   get hint(): string {
     if (this.notice) return this.notice;
-    if (this.adjustingReference && this.reference) return '調整底圖：拖曳移動底圖；縮放用設定裡的數值。完成後關掉「調整底圖」';
+    if (this.adjustingReference && this.reference) return t('調整底圖：拖曳移動底圖；縮放用設定裡的數值。完成後關掉「調整底圖」');
     switch (this.tool) {
       case 'line':
-        return `${this.guideMode ? '輔助線' : '直線'}：在起點按下，拖到終點放開`;
+        return t('{tool}：在起點按下，拖到終點放開', { tool: this.guideMode ? t('輔助線') : t('直線') });
       case 'circle':
-        return `${this.guideMode ? '輔助圓' : '圓'}：在圓心按下，拖到圓上的格點放開`;
+        return t('{tool}：在圓心按下，拖到圓上的格點放開', { tool: this.guideMode ? t('輔助圓') : t('圓') });
       case 'select':
-        return this.selectedPiece !== null ? '已選取一段：可以只刪這一段，或刪掉整條線' : '選取：點一條線（交點之間的一段）';
+        return this.selectedPiece !== null ? t('已選取一段：可以只刪這一段，或刪掉整條線') : t('選取：點一條線（交點之間的一段）');
       case 'fill':
-        return this.fillErase ? '移除填色：點一個已上色的封閉區域' : '填色：點一個封閉區域上色';
+        return this.fillErase ? t('移除填色：點一個已上色的封閉區域') : t('填色：點一個封閉區域上色');
     }
   }
 
@@ -383,7 +384,7 @@ export class Editor {
     const q: RPt = { x: dyadic(f.x).add(new Q(1n, 7919n)), y: dyadic(f.y).add(new Q(1n, 7907n)) };
     const face = this.graph.locate(q);
     if (face === null) {
-      this.notice = '這裡不是封閉區域（或剛好點在線上）';
+      this.notice = t('這裡不是封閉區域（或剛好點在線上）');
       this.onChange();
       return;
     }
@@ -437,7 +438,7 @@ export class Editor {
       this.addCurve({ ...shape, id: newId(), style: { ...this.style } });
     } else {
       this.marks = [];
-      this.notice = '請拖曳：按下後拖到另一個格點再放開';
+      this.notice = t('請拖曳：按下後拖到另一個格點再放開');
     }
     this.redraw();
     this.onChange();

@@ -1,5 +1,6 @@
 import type { Graph } from '../exact/graph';
 import type { Project } from '../model/types';
+import { t } from '../i18n';
 import { buildStrokes, facesByColor, junctionDots, paintFills, paintIcon, strokePath, SvgPath, traceCycle, type Mapper } from '../view/paint';
 import { contentBounds, outlineUnion, traceOutline } from '../view/outline';
 
@@ -76,7 +77,7 @@ export function renderPNG(project: Project, g: Graph, faceColors: Map<number, st
 }
 
 export function pngBlob(cv: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => cv.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG 產生失敗'))), 'image/png'));
+  return new Promise((resolve, reject) => cv.toBlob((b) => (b ? resolve(b) : reject(new Error(t('PNG 產生失敗')))), 'image/png'));
 }
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));

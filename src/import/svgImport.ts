@@ -10,6 +10,7 @@ import { Q } from '../exact/rational';
 import { newId, newProject } from '../model/project';
 import type { Curve, Project } from '../model/types';
 import type { Piece } from '../exact/graph';
+import { t } from '../i18n';
 
 type P = { x: number; y: number };
 const add = (a: P, b: P): P => ({ x: a.x + b.x, y: a.y + b.y });
@@ -39,11 +40,11 @@ export function parsePath(d: string): Seg[][] {
   const num = (): number => {
     ws();
     const m = /^[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/.exec(d.slice(i));
-    if (!m) throw new SyntaxError(`路徑數字格式錯誤（位置 ${i}）`);
+    if (!m) throw new SyntaxError(t('路徑數字格式錯誤（位置 {i}）', { i }));
     i += m[0].length;
     return Number(m[0]);
   };
-  const flag = (): number => { ws(); const c = d[i++]; if (c !== '0' && c !== '1') throw new SyntaxError('圓弧旗標錯誤'); return Number(c); };
+  const flag = (): number => { ws(); const c = d[i++]; if (c !== '0' && c !== '1') throw new SyntaxError(t('圓弧旗標錯誤')); return Number(c); };
   const more = () => { ws(); return i < d.length && /[-+.\d]/.test(d[i]); };
   const out: Seg[][] = [];
   let cur: Seg[] = [], p: P = { x: 0, y: 0 }, start: P = p, lastCtrl: P | null = null, lastCmd = '';
@@ -85,7 +86,7 @@ export function parsePath(d: string): Seg[][] {
     let cmd = d[i];
     if (/[a-zA-Z]/.test(cmd)) i++;
     else if (lastCmd) cmd = lastCmd === 'M' ? 'L' : lastCmd === 'm' ? 'l' : lastCmd; // implicit repeat
-    else throw new SyntaxError('路徑必須以 M 開頭');
+    else throw new SyntaxError(t('路徑必須以 M 開頭'));
     const rel = cmd === cmd.toLowerCase() && cmd !== 'z' && cmd !== 'Z';
     const pt = (): P => { const x = num(), y = num(); return rel ? { x: p.x + x, y: p.y + y } : { x, y }; };
     switch (cmd.toUpperCase()) {
@@ -122,7 +123,7 @@ export function parsePath(d: string): Seg[][] {
         lastCtrl = null;
         break;
       default:
-        throw new SyntaxError(`不支援的路徑指令 ${cmd}`);
+        throw new SyntaxError(t('不支援的路徑指令 {cmd}', { cmd }));
     }
     lastCmd = cmd;
     if (!/[zZ]/.test(cmd) && more()) continue;
@@ -140,7 +141,7 @@ const HEX = (rgb: string) => {
 export function readSvg(text: string): { shapes: Shape[]; svg: SVGSVGElement; host: HTMLElement; width: number; height: number } {
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
   const svg = doc.documentElement as unknown as SVGSVGElement;
-  if (svg.nodeName !== 'svg' || doc.querySelector('parsererror')) throw new Error('不是有效的 SVG 檔案');
+  if (svg.nodeName !== 'svg' || doc.querySelector('parsererror')) throw new Error(t('不是有效的 SVG 檔案'));
   const vb = svg.getAttribute('viewBox')?.split(/[\s,]+/).map(Number);
   const width = parseFloat(svg.getAttribute('width') ?? '') || vb?.[2] || 300;
   const height = parseFloat(svg.getAttribute('height') ?? '') || vb?.[3] || 150;
@@ -517,12 +518,12 @@ export interface ImportResult {
 /** Convert SVG text into a project of grid guides and fills, w × h grid. */
 export function importSvg(text: string, w: number, h: number): ImportResult {
   const { shapes, svg, width } = readSvg(text);
-  if (!shapes.length) throw new Error('SVG 裡沒有填色的圖形（只支援填色，不支援只有描邊的線條）');
+  if (!shapes.length) throw new Error(t('SVG 裡沒有填色的圖形（只支援填色，不支援只有描邊的線條）'));
   // normalise: the drawing's bounding box, longest side = 1
   const all = shapes.flatMap((sh) => sh.subpaths.flatMap((sp) => sp.flatMap((s) => [0, 0.25, 0.5, 0.75, 1].map(s))));
   const x0 = Math.min(...all.map((p) => p.x)), y0 = Math.min(...all.map((p) => p.y));
   const size = Math.max(Math.max(...all.map((p) => p.x)) - x0, Math.max(...all.map((p) => p.y)) - y0);
-  if (!(size > 0)) throw new Error('SVG 的圖形大小是 0');
+  if (!(size > 0)) throw new Error(t('SVG 的圖形大小是 0'));
   const norm = (s: Seg): Seg => (t) => { const p = s(t); return { x: (p.x - x0) / size, y: (p.y - y0) / size }; };
   const outlines: { prims: Prim[]; shape: number }[] = [];
   shapes.forEach((sh, si) => sh.subpaths.forEach((sp) => {
@@ -549,7 +550,7 @@ export function importSvg(text: string, w: number, h: number): ImportResult {
       if (!fit.failed) break;
     }
   }
-  if (!fit || fit.failed === outlines.length) throw new Error('在這個格數下沒有任何外框能轉換，請試更高的格數');
+  if (!fit || fit.failed === outlines.length) throw new Error(t('在這個格數下沒有任何外框能轉換，請試更高的格數'));
   const { scale, off, geoms } = fit;
   const centre = { x: (w - N) / 2, y: (h - N) / 2 };
   const shift = (p: P) => add(p, centre);

@@ -1,4 +1,8 @@
-# 格點幾何 Icon
+# 格點幾何 Icon · Grid Geometry Icon
+
+**English**: a web tool for drawing icons on a grid, for phones and desktops. You place points only on grid points; every other point is an intersection of two curves. There are just lines and circles — arcs come from cutting circles and deleting pieces. Intersections, pieces and closed regions are computed exactly (BigInt rationals and p + q√d), floating point is used only for drawing and export. Exports PNG (batch sizes, pixel snapping) and SVG, and can turn a filled SVG into grid circles and lines. The interface follows your browser language (Traditional Chinese or English); switch with the language button. Live: https://chanwunkong.github.io/grid-icon/
+
+---
 
 在格點上畫 icon 的網頁工具（Vite + TypeScript，不使用前端框架）。手機和電腦都能用。
 
@@ -8,6 +12,10 @@
 - 只有兩種曲線：直線和圓。圓弧是用直線（或不會匯出的「輔助線」）切開圓，再刪掉不要的片段做出來的。
 - **精確層**：交點、切分、封閉區域判定全部用精確數學（BigInt 有理數，以及 p + q√d），不用浮點容差。
 - **渲染層**：只有畫到 Canvas 和匯出時才轉成浮點。
+
+## 介面語言
+
+依瀏覽器語言自動選擇繁體中文或英文；電腦版在上方按鈕列、手機版在「設定」最上面可以切換，選擇會記住。字串都在 `src/i18n-en.ts`（中文原文當鍵值），`tests/i18n.test.ts` 會檢查每個字串都有英文、沒有漏掉的中文。
 
 ## 開發（Windows PowerShell）
 
