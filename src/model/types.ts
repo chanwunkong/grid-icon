@@ -12,6 +12,7 @@ export interface Style {
   cap: Cap;
   join: Join;
   miterLimit: number;
+  color: string; // #rrggbb
 }
 
 // A guide cuts other curves (it creates intersections) but is not part of the icon:
@@ -69,4 +70,4 @@ export interface Project {
   fills: Fill[];
 }
 
-export const DEFAULT_STYLE: Style = { width: 2, cap: 'round', join: 'round', miterLimit: 4 };
+export const DEFAULT_STYLE: Style = { width: 2, cap: 'round', join: 'round', miterLimit: 4, color: '#000000' };

@@ -5,11 +5,10 @@
 //    original corner and no corner bends much more than it did.
 // 3. All curves become guides; the regions they enclose are filled with the original colours.
 // Floating point is fine here: this only proposes curves. Everything after that is exact.
-import { Graph, type RPt } from '../exact/graph';
-import { Q } from '../exact/rational';
+import ClipperLib from 'clipper-lib';
+import { Graph } from '../exact/graph';
 import { newId, newProject } from '../model/project';
 import type { Curve, Project } from '../model/types';
-import type { Piece } from '../exact/graph';
 import { t } from '../i18n';
 
 type P = { x: number; y: number };
@@ -31,6 +30,8 @@ interface Shape {
   subpaths: Seg[][];
   color: string;
   evenodd: boolean;
+  // a stroke turned into its filled outline: polygons (dense points) instead of curve segments
+  polys?: P[][];
 }
 
 /** Parse SVG path data into subpaths of parametric segments (in the path's own coordinates). */
@@ -158,7 +159,11 @@ export function readSvg(text: string): { shapes: Shape[]; svg: SVGSVGElement; ho
     for (const el of live.querySelectorAll<SVGGraphicsElement>('path, circle, ellipse, rect, polygon, polyline')) {
       if (el.closest('defs, clipPath, mask, symbol, pattern')) continue;
       const cs = getComputedStyle(el);
-      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.fill === 'none' || cs.fill.startsWith('url(')) continue;
+      if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+      const hasFill = cs.fill !== 'none' && !cs.fill.startsWith('url(');
+      const strokeW = parseFloat(cs.strokeWidth) || 0;
+      const hasStroke = cs.stroke !== 'none' && !cs.stroke.startsWith('url(') && strokeW > 0;
+      if (!hasFill && !hasStroke) continue;
       let d = '';
       const n = (a: string) => parseFloat(el.getAttribute(a) ?? '0') || 0;
       switch (el.tagName) {
@@ -170,13 +175,49 @@ export function readSvg(text: string): { shapes: Shape[]; svg: SVGSVGElement; ho
       }
       const m = el.getCTM() ?? live.createSVGMatrix();
       const tf = (q: P): P => ({ x: m.a * q.x + m.c * q.y + m.e, y: m.b * q.x + m.d * q.y + m.f });
-      const subpaths = parsePath(d).map((sp) => sp.map((s) => (t: number) => tf(s(t))));
-      if (subpaths.length) shapes.push({ subpaths, color: HEX(cs.fill), evenodd: cs.fillRule === 'evenodd' });
+      const raw = parsePath(d);
+      const subpaths = raw.map((sp) => sp.map((s) => (t: number) => tf(s(t))));
+      if (!subpaths.length) continue;
+      if (hasFill) shapes.push({ subpaths, color: HEX(cs.fill), evenodd: cs.fillRule === 'evenodd' });
+      if (hasStroke) {
+        // the stroke drawn on top of the fill, as its own filled outline
+        const closed = raw.map((sp) => /z\s*$/i.test(d) || (sp.length > 0 && dist(sp[0](0), sp[sp.length - 1](1)) < 1e-9));
+        const scale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1; // stroke width follows the transform
+        const polys = strokeOutline(subpaths, closed, strokeW * scale, cs.strokeLinecap, cs.strokeLinejoin, parseFloat(cs.strokeMiterlimit) || 4);
+        if (polys.length) shapes.push({ subpaths: polys.map((pl) => pl.map((a, i) => lineSeg(a, pl[(i + 1) % pl.length]))), color: HEX(cs.stroke), evenodd: false, polys });
+      }
     }
   } finally {
     host.remove();
   }
   return { shapes, svg, host, width, height };
+}
+
+const dist = (a: P, b: P) => Math.hypot(a.x - b.x, a.y - b.y);
+const lineSeg = (a: P, b: P): Seg => (t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+
+/** A stroke turned into filled polygons (dense points), with its caps and joins. */
+function strokeOutline(subpaths: Seg[][], closed: boolean[], width: number, cap: string, join: string, miter: number): P[][] {
+  // flatten finely: the outline is fitted with arcs and lines again afterwards
+  const pts = subpaths.map((sp) => {
+    const out: P[] = [sp[0](0)];
+    for (const s of sp) for (let k = 1; k <= 48; k++) out.push(s(k / 48));
+    return out;
+  });
+  const all = pts.flat();
+  const ext = Math.max(Math.max(...all.map((p) => p.x)) - Math.min(...all.map((p) => p.x)), Math.max(...all.map((p) => p.y)) - Math.min(...all.map((p) => p.y)), width) || 1;
+  const k = 1e5 / ext; // integer units for clipper
+  const co = new ClipperLib.ClipperOffset(miter, 1e-4 * 1e5);
+  const jt = join === 'round' ? ClipperLib.JoinType.jtRound : join === 'miter' ? ClipperLib.JoinType.jtMiter : ClipperLib.JoinType.jtSquare;
+  const et = cap === 'round' ? ClipperLib.EndType.etOpenRound : cap === 'square' ? ClipperLib.EndType.etOpenSquare : ClipperLib.EndType.etOpenButt;
+  pts.forEach((pl, i) => {
+    const path = pl.map((p) => ({ X: Math.round(p.x * k), Y: Math.round(p.y * k) }))
+      .filter((p, j, a) => j === 0 || p.X !== a[j - 1].X || p.Y !== a[j - 1].Y);
+    if (path.length >= 2) co.AddPath(path, jt, closed[i] ? ClipperLib.EndType.etClosedLine : et);
+  });
+  const sol: { X: number; Y: number }[][] = [];
+  co.Execute(sol, (width / 2) * k);
+  return sol.map((path) => path.map((p) => ({ x: p.X / k, y: p.Y / k })));
 }
 
 // ------------------------------------------------------------------ arcs and lines
@@ -247,6 +288,63 @@ export function primitives(segs: Seg[]): Prim[] {
       const f = fitCircle(z);
       if (f.err < TOL) { out[0] = { kind: 'arc', c: f.c, r: f.r, z }; out.pop(); }
     } else if (straightErr(z) < TOL) { out[0] = { kind: 'line', a: z[0], b: z[z.length - 1], z }; out.pop(); }
+  }
+  return out;
+}
+
+/**
+ * Arcs and lines through a dense closed polygon (an outline from strokeOutline): start at the sharpest
+ * corner and grow each piece over as many points as one arc or one line fits within TOL.
+ */
+export function primitivesFromPoints(input: P[]): Prim[] {
+  if (input.length < 3) return [];
+  // resample long edges so straight runs have as many points as curved ones
+  const STEP = 0.004;
+  const points: P[] = [];
+  input.forEach((a, i) => {
+    const b = input[(i + 1) % input.length], k = Math.max(1, Math.ceil(dist(a, b) / STEP));
+    for (let j = 0; j < k; j++) points.push({ x: a.x + ((b.x - a.x) * j) / k, y: a.y + ((b.y - a.y) * j) / k });
+  });
+  const n = points.length;
+  let start = 0, sharp = -1;
+  for (let i = 0; i < n; i++) {
+    const a = points[(i - 1 + n) % n], b = points[i], c = points[(i + 1) % n];
+    const u = sub(b, a), v = sub(c, b), turn = Math.abs(Math.atan2(cross(u, v), dot(u, v)));
+    if (turn > sharp) [sharp, start] = [turn, i];
+  }
+  const seq = [...points.slice(start), ...points.slice(0, start), points[start]];
+  const out: Prim[] = [];
+  let i = 0;
+  while (i < seq.length - 1) {
+    let end = i + 1, best: Prim = { kind: 'line', a: seq[i], b: seq[end], z: [seq[i], seq[end]] };
+    for (let j = i + 2; j < seq.length; j++) {
+      const z = seq.slice(i, j + 1);
+      if (straightErr(z) < TOL) best = { kind: 'line', a: z[0], b: z[z.length - 1], z };
+      else {
+        const f = fitCircle(z);
+        // a nearly flat "arc" over a straight run plus the start of a bend: the straight run ends there
+        if (f.err >= TOL || f.r > 2) break;
+        best = { kind: 'arc', c: f.c, r: f.r, z };
+      }
+      end = j;
+    }
+    // a few points always fit some circle (e.g. across a sharp corner): such short arcs become a line
+    if (best.kind === 'arc' && best.z.length < 6) [end, best] = [i + 1, { kind: 'line', a: seq[i], b: seq[i + 1], z: [seq[i], seq[i + 1]] }];
+    // the joint code reads tangents from z[3] and z[len - 4]
+    if (best.kind === 'line' && best.z.length < 4) best.z = [0, 1, 2, 3].map((k) => ({ x: best.a.x + ((best.b.x - best.a.x) * k) / 3, y: best.a.y + ((best.b.y - best.a.y) * k) / 3 }));
+    out.push(best);
+    i = end;
+  }
+  // the start point may fall inside an arc: join the two halves when one circle fits both
+  if (out.length > 2) {
+    const first = out[0], last = out[out.length - 1];
+    if (first.kind === 'arc' && last.kind === 'arc') {
+      const z = [...last.z, ...first.z.slice(1)], f = fitCircle(z);
+      if (f.err < TOL) {
+        out.pop();
+        out[0] = { kind: 'arc', c: f.c, r: f.r, z };
+      }
+    }
   }
   return out;
 }
@@ -471,41 +569,6 @@ function winding(poly: P[], q: P): number {
   return w;
 }
 
-function* facePoints(g: Graph, face: number): Generator<P> {
-  for (const hid of g.cycles[face].halves) {
-    const h = g.halves[hid], e = g.edges[h.edge], pc: Piece = g.pieces[e.pieces[0]];
-    const A = g.vertices[h.origin].f, B = g.vertices[h.target].f;
-    let mid: P, dir: P;
-    if (pc.geom.kind === 'line') {
-      mid = mul(add(A, B), 0.5);
-      dir = sub(B, A);
-    } else {
-      const c = pc.geom.c, r = Math.sqrt(Number(pc.geom.r2));
-      const a0 = Math.atan2(A.y - c.y, A.x - c.x);
-      let a1 = Math.atan2(B.y - c.y, B.x - c.x);
-      if (h.forward) { if (a1 <= a0) a1 += 2 * Math.PI; } else if (a1 >= a0) a1 -= 2 * Math.PI;
-      if (h.origin === h.target) a1 = a0 + (h.forward ? 2 * Math.PI : -2 * Math.PI);
-      const am = (a0 + a1) / 2;
-      mid = { x: c.x + r * Math.cos(am), y: c.y + r * Math.sin(am) };
-      dir = h.forward ? { x: -Math.sin(am), y: Math.cos(am) } : { x: Math.sin(am), y: -Math.cos(am) };
-    }
-    const l = len(dir);
-    if (l < 1e-12) continue;
-    // deepest first: the fill's point (and the colour test) should sit well inside the face
-    for (const eps of [0.5, 0.25, 0.1, 0.04, 0.02, 0.005]) yield { x: mid.x + (-dir.y / l) * eps, y: mid.y + (dir.x / l) * eps };
-  }
-}
-
-/** A point just inside a face (left of one of its half-edges), checked exactly with the graph. */
-function pointInFace(g: Graph, face: number): RPt | null {
-  const dy = (v: number) => new Q(BigInt(Math.round(v * 4096)), 4096n);
-  for (const p of facePoints(g, face)) {
-    const q = { x: dy(p.x), y: dy(p.y) };
-    if (g.locate(q) === face) return q;
-  }
-  return null;
-}
-
 export interface ImportResult {
   project: Project;
   deviationPct: number; // worst deviation, % of the drawing size
@@ -518,7 +581,7 @@ export interface ImportResult {
 /** Convert SVG text into a project of grid guides and fills, w × h grid. */
 export function importSvg(text: string, w: number, h: number): ImportResult {
   const { shapes, svg, width } = readSvg(text);
-  if (!shapes.length) throw new Error(t('SVG 裡沒有填色的圖形（只支援填色，不支援只有描邊的線條）'));
+  if (!shapes.length) throw new Error(t('SVG 裡沒有可以匯入的圖形（需要填色或描邊）'));
   // normalise: the drawing's bounding box, longest side = 1
   const all = shapes.flatMap((sh) => sh.subpaths.flatMap((sp) => sp.flatMap((s) => [0, 0.25, 0.5, 0.75, 1].map(s))));
   const x0 = Math.min(...all.map((p) => p.x)), y0 = Math.min(...all.map((p) => p.y));
@@ -526,10 +589,19 @@ export function importSvg(text: string, w: number, h: number): ImportResult {
   if (!(size > 0)) throw new Error(t('SVG 的圖形大小是 0'));
   const norm = (s: Seg): Seg => (t) => { const p = s(t); return { x: (p.x - x0) / size, y: (p.y - y0) / size }; };
   const outlines: { prims: Prim[]; shape: number }[] = [];
-  shapes.forEach((sh, si) => sh.subpaths.forEach((sp) => {
-    const prims = primitives(sp.map(norm));
-    if (prims.length) outlines.push({ prims, shape: si });
-  }));
+  shapes.forEach((sh, si) => {
+    if (sh.polys) {
+      for (const pl of sh.polys) {
+        const prims = primitivesFromPoints(pl.map((p) => ({ x: (p.x - x0) / size, y: (p.y - y0) / size })));
+        if (prims.length) outlines.push({ prims, shape: si });
+      }
+      return;
+    }
+    sh.subpaths.forEach((sp) => {
+      const prims = primitives(sp.map(norm));
+      if (prims.length) outlines.push({ prims, shape: si });
+    });
+  });
   const bw = (Math.max(...all.map((p) => p.x)) - x0) / size, bh = (Math.max(...all.map((p) => p.y)) - y0) / size;
   const N = Math.min(w, h);
   // try strict first, then allow more candidates and a little more bend
@@ -556,7 +628,7 @@ export function importSvg(text: string, w: number, h: number): ImportResult {
   const shift = (p: P) => add(p, centre);
 
   // curves: every grid curve once, all as guides
-  const style = { width: 1, cap: 'round' as const, join: 'round' as const, miterLimit: 4 };
+  const style = { width: 1, cap: 'round' as const, join: 'round' as const, miterLimit: 4, color: '#000000' };
   const curves: Curve[] = [];
   const seen = new Set<string>();
   // a line in the project is a segment between its two grid points: stretch it along itself (by whole
@@ -614,12 +686,12 @@ export function importSvg(text: string, w: number, h: number): ImportResult {
     // cheap float check first: most faces lie outside the drawing and get no fill. Several probe
     // points, because one of them may slip into a neighbour when the face is a thin sliver.
     let maybe = false, k = 0;
-    for (const p of facePoints(g, face)) {
+    for (const p of g.facePoints(face)) {
       if (colorAt(p)) { maybe = true; break; }
       if (++k >= 12) break;
     }
     if (!maybe) continue;
-    const q = pointInFace(g, face);
+    const q = g.interiorPoint(face);
     if (!q) continue;
     const fq = { x: q.x.toNumber(), y: q.y.toNumber() };
     let color: string | null = null;

@@ -26,6 +26,10 @@ jobs:
       - run: npm ci
       - name: 單元測試
         run: npm test
+      - name: 瀏覽器測試（Playwright）
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e
       - name: 建置
         run: npm run build
       - uses: actions/configure-pages@v5

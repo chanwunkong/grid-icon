@@ -11,6 +11,16 @@ declare module 'clipper-lib' {
     Execute(clipType: number, solution: Paths, subjFill: number, clipFill: number): boolean;
     static Area(path: Path): number;
   }
-  const ClipperLib: { Clipper: typeof Clipper; ClipType: typeof ClipType; PolyType: typeof PolyType; PolyFillType: typeof PolyFillType };
+  export const JoinType: { jtSquare: number; jtRound: number; jtMiter: number };
+  export const EndType: { etClosedPolygon: number; etClosedLine: number; etOpenButt: number; etOpenSquare: number; etOpenRound: number };
+  export class ClipperOffset {
+    constructor(miterLimit?: number, arcTolerance?: number);
+    AddPath(path: Path, joinType: number, endType: number): void;
+    Execute(solution: Paths, delta: number): void;
+  }
+  const ClipperLib: {
+    Clipper: typeof Clipper; ClipType: typeof ClipType; PolyType: typeof PolyType; PolyFillType: typeof PolyFillType;
+    ClipperOffset: typeof ClipperOffset; JoinType: typeof JoinType; EndType: typeof EndType;
+  };
   export default ClipperLib;
 }

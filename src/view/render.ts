@@ -22,6 +22,7 @@ export interface Scene {
   overflowing: boolean; // content reaches past the canvas: warn with the border
   reference: Reference | null; // tracing image, drawn under the grid
   hover: Pt | null; // snapped grid point under the mouse
+  magnet: boolean; // hover was pulled to a key point by the magnet
   marks: Pt[]; // points already clicked for the shape being drawn
   preview: Curve | null;
   guide: Pt | null; // point being dragged: draw crosshair lines and its coordinates
@@ -178,7 +179,7 @@ export function render(ctx: CanvasRenderingContext2D, s: Scene) {
 
   const m: Mapper = { s: vp.scale, ox: vp.ox, oy: vp.oy };
   const g = s.graph;
-  paintIcon(ctx, project.curves, g, s.faceColors, m, COLORS.line);
+  paintIcon(ctx, project.curves, g, s.faceColors, m);
   // guides: thin dashed centre lines, only their remaining pieces
   const guides = new Set(project.curves.filter((c) => c.guide).map((c) => c.id));
   ctx.save();
@@ -217,6 +218,7 @@ export function render(ctx: CanvasRenderingContext2D, s: Scene) {
   for (const p of s.marks) dot(ctx, vp, p, r, COLORS.mark);
   if (s.guide) drawGuide(ctx, s, s.guide);
   if (s.hover) dot(ctx, vp, s.hover, r + 3, COLORS.mark, true);
+  if (s.hover && s.magnet) dot(ctx, vp, s.hover, r + 9, COLORS.mark, true);
 }
 
 function drawGuide(ctx: CanvasRenderingContext2D, s: Scene, p: Pt) {

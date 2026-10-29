@@ -3,6 +3,10 @@ import { mountApp } from './ui/app';
 
 mountApp(document.getElementById('app')!);
 
+// offline support / add to home screen (production only: in development it would cache stale modules)
+if (import.meta.env.PROD && 'serviceWorker' in navigator)
+  addEventListener('load', () => navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {}));
+
 // Only the canvas zooms (with its own pinch / wheel handling). Stop the browser from zooming the
 // whole page, which pushes the toolbars off screen: iOS gesture events, multi-finger moves outside
 // the canvas, and double-tap zoom.

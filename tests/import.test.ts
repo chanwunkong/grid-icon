@@ -52,3 +52,25 @@ describe('splitting outlines into arcs and lines', () => {
     expect(primitives(sp).map((p) => p.kind).sort()).toEqual(['arc', 'line']);
   });
 });
+
+describe('primitivesFromPoints', () => {
+  it('fits a dense circle with arcs and a square with four lines', async () => {
+    const { primitivesFromPoints } = await import('../src/import/svgImport');
+    const circle = Array.from({ length: 200 }, (_, i) => ({ x: 0.5 + 0.3 * Math.cos((i / 200) * 2 * Math.PI), y: 0.5 + 0.3 * Math.sin((i / 200) * 2 * Math.PI) }));
+    const cp = primitivesFromPoints(circle);
+    expect(cp.every((p) => p.kind === 'arc')).toBe(true);
+    expect(cp.length).toBeLessThanOrEqual(2);
+    const sq = primitivesFromPoints([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]);
+    expect(sq.map((p) => p.kind)).toEqual(['line', 'line', 'line', 'line']);
+  });
+  it('splits a stadium (rounded stroke of a segment) into two lines and two half circles', async () => {
+    const { primitivesFromPoints } = await import('../src/import/svgImport');
+    const pts: { x: number; y: number }[] = [];
+    // segment from (0.3,0.5) to (0.7,0.5), half width 0.1, round caps
+    for (let i = 0; i <= 40; i++) { const a = -Math.PI / 2 + (i / 40) * Math.PI; pts.push({ x: 0.7 + 0.1 * Math.cos(a), y: 0.5 + 0.1 * Math.sin(a) }); }
+    for (let i = 0; i <= 40; i++) { const a = Math.PI / 2 + (i / 40) * Math.PI; pts.push({ x: 0.3 + 0.1 * Math.cos(a), y: 0.5 + 0.1 * Math.sin(a) }); }
+    const kinds = primitivesFromPoints(pts).map((p) => p.kind);
+    expect(kinds.filter((k) => k === 'line').length).toBe(2);
+    expect(kinds.filter((k) => k === 'arc').length).toBe(2);
+  });
+});

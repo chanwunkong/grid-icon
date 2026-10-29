@@ -136,10 +136,26 @@ function strokeOutline(g: Graph, st: Stroke, out: Paths) {
   for (const p of f.paths) strokePolys(p.pts, p.corner, p.closed, st.style, out);
 }
 
-/** Union of all visible strokes as outlines (integer paths, 1 grid unit = SCALE). */
+/** Outlines of the visible strokes, united per colour (integer paths, 1 grid unit = SCALE). */
+export function outlinesByColor(curves: Curve[], g: Graph): Map<string, Paths> {
+  const groups = new Map<string, Paths>();
+  for (const st of buildStrokes(curves, g)) {
+    if (!groups.has(st.style.color)) groups.set(st.style.color, []);
+    strokeOutline(g, st, groups.get(st.style.color)!);
+  }
+  const out = new Map<string, Paths>();
+  for (const [color, parts] of groups) out.set(color, unite(parts));
+  return out;
+}
+
+/** Union of all visible strokes as outlines, whatever their colour. */
 export function outlineUnion(curves: Curve[], g: Graph): Paths {
   const parts: Paths = [];
   for (const st of buildStrokes(curves, g)) strokeOutline(g, st, parts);
+  return unite(parts);
+}
+
+function unite(parts: Paths): Paths {
   if (!parts.length) return [];
   // every part is a convex polygon; orient them all the same way so non-zero union is exact
   for (const p of parts) if (ClipperLib.Clipper.Area(p) < 0) p.reverse();

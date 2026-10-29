@@ -47,7 +47,9 @@ export function parseProject(text: string): Project {
     if (!s || !isInt(s.width) || s.width < 1 || !caps.includes(s.cap) || !joins.includes(s.join)
       || typeof s.miterLimit !== 'number' || !(s.miterLimit >= 1))
       throw new LoadError(t('線條樣式不正確'));
-    return { width: s.width, cap: s.cap, join: s.join, miterLimit: s.miterLimit };
+    // colour came later: older files have none (black)
+    const color = typeof s.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(s.color) ? s.color.toLowerCase() : '#000000';
+    return { width: s.width, cap: s.cap, join: s.join, miterLimit: s.miterLimit, color };
   };
   const curves: Curve[] = (raw.curves ?? []).map((c: any, i: number): Curve => {
     const id = typeof c?.id === 'string' ? c.id : newId();

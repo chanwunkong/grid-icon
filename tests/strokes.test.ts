@@ -6,7 +6,7 @@ import { newProject } from '../src/model/project';
 import type { Cap, Curve, Style } from '../src/model/types';
 
 let n = 0;
-const st = (cap: Cap, width = 2): Style => ({ width, cap, join: 'miter', miterLimit: 4 });
+const st = (cap: Cap, width = 2, color = '#000000'): Style => ({ width, cap, join: 'miter', miterLimit: 4, color });
 const line = (ax: number, ay: number, bx: number, by: number, style = st('butt'), guide = false): Curve =>
   ({ id: `l${n++}`, kind: 'line', a: { x: ax, y: ay }, b: { x: bx, y: by }, guide, style });
 const circle = (cx: number, cy: number, px: number, py: number, style = st('butt')): Curve =>
@@ -26,6 +26,11 @@ describe('stroke chaining', () => {
     const strokes = buildStrokes(cs, new Graph(cs));
     expect(strokes).toHaveLength(1);
     expect(strokes[0].steps).toHaveLength(2);
+  });
+  it('different colours are not chained, and each stroke keeps its colour', () => {
+    const cs = [line(2, 2, 10, 2, st('butt', 2, '#ff0000')), line(10, 2, 10, 10, st('butt', 2, '#0000ff'))];
+    const strokes = buildStrokes(cs, new Graph(cs));
+    expect(strokes.map((s) => s.style.color).sort()).toEqual(['#0000ff', '#ff0000']);
   });
   it('different styles are not chained', () => {
     const cs = [line(2, 2, 10, 2, st('butt', 2)), line(10, 2, 10, 10, st('butt', 3))];
@@ -62,7 +67,7 @@ describe('stroke chaining', () => {
   it('a T junction gets a dot as wide as the widest line', () => {
     const cs = [line(0, 5, 10, 5, st('butt', 2)), line(5, 5, 5, 10, st('butt', 4))];
     const dots = junctionDots(cs, new Graph(cs));
-    expect(dots).toEqual([{ x: 5, y: 5, r: 2 }]);
+    expect(dots).toEqual([{ x: 5, y: 5, r: 2, color: '#000000' }]);
   });
 });
 
@@ -79,7 +84,7 @@ describe('export', () => {
   it('writes real SVG arcs, clipped to the canvas', () => {
     const p = newProject(24, 24);
     p.curves.push(circle(12, 12, 20, 12, st('round')));
-    const svg = renderSVG(p, new Graph(p.curves), new Map(), { transparent: true, background: '#fff', margin: 2, ink: '#000', outline: false, crop: true });
+    const svg = renderSVG(p, new Graph(p.curves), new Map(), { transparent: true, background: '#fff', margin: 2, outline: false, crop: true });
     expect(svg).toContain('viewBox="0 0 28 28"');
     expect(svg).toContain('clip-path="url(#canvas)"');
     expect(svg.match(/A8 8 0 0 1/g)).toHaveLength(2); // a full circle as two half arcs
@@ -89,7 +94,7 @@ describe('export', () => {
   it('outline mode writes one filled path and no strokes', () => {
     const p = newProject(24, 24);
     p.curves.push(line(4, 12, 20, 12, st('butt')), line(12, 4, 12, 20, st('butt')), circle(12, 12, 18, 12, st('round')));
-    const svg = renderSVG(p, new Graph(p.curves), new Map(), { transparent: true, background: '#fff', margin: 0, ink: '#000', outline: true, crop: true });
+    const svg = renderSVG(p, new Graph(p.curves), new Map(), { transparent: true, background: '#fff', margin: 0, outline: true, crop: true });
     expect(svg.match(/<path /g)).toHaveLength(1);
     expect(svg).not.toContain('stroke=');
     expect(svg).not.toContain('<circle');

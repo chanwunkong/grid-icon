@@ -27,6 +27,7 @@ export interface Dot {
   x: number;
   y: number;
   r: number; // grid units
+  color: string;
 }
 
 /** Something that accepts path commands: a canvas context, or the SVG path writer below. */
@@ -98,7 +99,7 @@ export function paintFills(ctx: CanvasRenderingContext2D, g: Graph, faceColors: 
   }
 }
 
-const styleKey = (s: Style) => `${s.width}|${s.cap}|${s.join}|${s.miterLimit}`;
+const styleKey = (s: Style) => `${s.width}|${s.cap}|${s.join}|${s.miterLimit}|${s.color}`;
 
 /** Unit direction leaving vertex `at` along a piece. */
 function leaving(g: Graph, pc: Piece, atStart: boolean) {
@@ -186,17 +187,18 @@ export function buildStrokes(curves: Curve[], g: Graph): Stroke[] {
 /** Where three or more visible pieces meet: a round dot as wide as the widest of them. */
 export function junctionDots(curves: Curve[], g: Graph): Dot[] {
   const byId = new Map(curves.map((c) => [c.id, c]));
-  const count = new Map<number, { n: number; w: number }>();
+  const count = new Map<number, { n: number; w: number; color: string }>();
   for (const p of g.pieces) {
     const c = byId.get(p.curve);
     if (p.erased || !c || c.guide) continue;
     for (const v of p.from === p.to ? [p.from, p.from] : [p.from, p.to]) {
-      const e = count.get(v) ?? { n: 0, w: 0 };
-      count.set(v, { n: e.n + 1, w: Math.max(e.w, c.style.width) });
+      const e = count.get(v) ?? { n: 0, w: 0, color: c.style.color };
+      // the dot takes the colour of the widest line meeting there
+      count.set(v, { n: e.n + 1, w: Math.max(e.w, c.style.width), color: c.style.width > e.w ? c.style.color : e.color });
     }
   }
   const dots: Dot[] = [];
-  for (const [v, { n, w }] of count) if (n >= 3) dots.push({ x: g.vertices[v].f.x, y: g.vertices[v].f.y, r: w / 2 });
+  for (const [v, { n, w, color }] of count) if (n >= 3) dots.push({ x: g.vertices[v].f.x, y: g.vertices[v].f.y, r: w / 2, color });
   return dots;
 }
 
@@ -206,7 +208,7 @@ export function strokePath(sink: PathSink, g: Graph, st: Stroke, m: Mapper) {
 }
 
 /** The icon itself: fills, then strokes, then junction dots. */
-export function paintIcon(ctx: CanvasRenderingContext2D, curves: Curve[], g: Graph, faceColors: Map<number, string>, m: Mapper, ink: string,
+export function paintIcon(ctx: CanvasRenderingContext2D, curves: Curve[], g: Graph, faceColors: Map<number, string>, m: Mapper,
   pixelNudge?: (widthPx: number) => number) {
   paintFills(ctx, g, faceColors, m);
   for (const st of buildStrokes(curves, g)) {
@@ -215,7 +217,7 @@ export function paintIcon(ctx: CanvasRenderingContext2D, curves: Curve[], g: Gra
     if (nudge) ctx.translate(nudge, nudge);
     ctx.beginPath();
     strokePath(ctx, g, st, m);
-    ctx.strokeStyle = ink;
+    ctx.strokeStyle = st.style.color;
     ctx.lineWidth = wpx;
     ctx.lineCap = st.style.cap;
     ctx.lineJoin = st.style.join;
@@ -223,8 +225,8 @@ export function paintIcon(ctx: CanvasRenderingContext2D, curves: Curve[], g: Gra
     ctx.stroke();
     ctx.restore();
   }
-  ctx.fillStyle = ink;
   for (const d of junctionDots(curves, g)) {
+    ctx.fillStyle = d.color;
     ctx.beginPath();
     ctx.arc(m.ox + d.x * m.s, m.oy + d.y * m.s, d.r * m.s, 0, TAU);
     ctx.fill();

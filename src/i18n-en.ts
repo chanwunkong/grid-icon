@@ -40,11 +40,14 @@ export const en: Record<string, string> = {
   '線寬 −1': 'Width −1',
   '線寬 +1': 'Width +1',
   '線寬': 'Width',
+  '顏色': 'Colour',
   '取消': 'Cancel',
   '調整底圖': 'Move reference',
   '線端與轉角': 'Ends & corners',
   '顯示': 'Display',
   '格線': 'Grid',
+  '拖曳到線的端點、圓心或交點附近時自動對齊過去': 'Dragging near a curve end, a centre or an intersection lands exactly on it',
+  '磁吸（靠近端點、圓心、交點時自動對齊）': 'Magnet (snap to nearby ends, centres and intersections)',
   'Keyline 參考形狀': 'Keyline shapes',
   '放大': 'Zoom in',
   '縮小': 'Zoom out',
@@ -130,8 +133,6 @@ export const en: Record<string, string> = {
   '寬（格）': 'Width (grid)',
   '高（格）': 'Height (grid)',
   '或從 SVG 匯入': 'Or import an SVG',
-  '把填色的 SVG 自動轉成格點上的圓和直線（全部是輔助線），各區域用原本的顏色填色，原圖會設成底圖方便比對。格數用上面的設定；換個格數重新匯入就能比較。':
-    'Turns a filled SVG into circles and lines on the grid (all guides), fills each region with its original colour, and puts the original underneath as a reference. Uses the grid size above; import again with another size to compare.',
   '寬和高都要是 {min}–{max} 的整數': 'Width and height must be whole numbers from {min} to {max}',
   '匯入會取代目前的畫布（請先儲存），確定嗎？': 'Importing replaces the current canvas (save it first). Continue?',
   '轉換中…（大的圖形或高格數可能要幾秒）': 'Converting… (large drawings or big grids can take a few seconds)',
@@ -142,6 +143,15 @@ export const en: Record<string, string> = {
   '匯入失敗：{msg}': 'Import failed: {msg}',
   '開新專案會清掉目前的畫布（請先儲存），確定嗎？': 'A new project clears the current canvas (save it first). Continue?',
   '無法開啟：{msg}': 'Could not open: {msg}',
+
+  // examples
+  '圓環': 'Ring',
+  '愛心': 'Heart',
+  '定位點': 'Location pin',
+  '雲': 'Cloud',
+  '葉子': 'Leaf',
+  '笑臉（用輔助線切圓做出圓弧）': 'Smile (an arc cut from a circle by a guide)',
+  '房子（線條）': 'House (lines)',
 
   // project file errors
   '不是有效的 JSON 檔案': 'Not a valid JSON file',
@@ -163,7 +173,7 @@ export const en: Record<string, string> = {
   '路徑必須以 M 開頭': 'Path data must start with M',
   '不支援的路徑指令 {cmd}': 'Unsupported path command {cmd}',
   '不是有效的 SVG 檔案': 'Not a valid SVG file',
-  'SVG 裡沒有填色的圖形（只支援填色，不支援只有描邊的線條）': 'The SVG has no filled shapes (only fills are supported, not stroke-only lines)',
+  'SVG 裡沒有可以匯入的圖形（需要填色或描邊）': 'The SVG has nothing to import (it needs fills or strokes)',
   'SVG 的圖形大小是 0': 'The SVG drawing has zero size',
   '在這個格數下沒有任何外框能轉換，請試更高的格數': 'No outline could be converted at this grid size; try a larger one',
 
@@ -171,10 +181,36 @@ export const en: Record<string, string> = {
   '調整底圖：拖曳移動底圖；縮放用設定裡的數值。完成後關掉「調整底圖」': 'Moving the reference: drag to move it; set its size in Settings. Turn off "Move reference" when done',
   '{tool}：在起點按下，拖到終點放開': '{tool}: press at the start, drag to the end, release',
   '{tool}：在圓心按下，拖到圓上的格點放開': '{tool}: press at the centre, drag to a grid point on the circle, release',
+  '這裡有 {n} 段重疊或相鄰的線，再點一次換下一段': '{n} pieces overlap or sit close here; tap again for the next one',
   '已選取一段：可以只刪這一段，或刪掉整條線': 'Piece selected: delete just this piece, or the whole curve',
   '選取：點一條線（交點之間的一段）': 'Select: tap a curve (a piece between intersections)',
   '移除填色：點一個已上色的封閉區域': 'Remove fill: tap a filled region',
   '填色：點一個封閉區域上色': 'Fill: tap a closed region',
   '這裡不是封閉區域（或剛好點在線上）': 'Not a closed region here (or you tapped exactly on a line)',
   '請拖曳：按下後拖到另一個格點再放開': 'Drag: press, move to another grid point, then release',
+
+  // new project: examples
+  '或打開範例': 'Or open an example',
+  '把 SVG 的填色和描邊自動轉成格點上的圓和直線（全部是輔助線），各區域用原本的顏色填色，原圖會設成底圖方便比對。格數用上面的設定；換個格數重新匯入就能比較。':
+    'Turns the fills and strokes of an SVG into circles and lines on the grid (all guides), fills each region with its original colour, and puts the original underneath as a reference. Uses the grid size above; import again with another size to compare.',
+
+  // tutorial
+  '再看一次教學': 'Show the tutorial again',
+  '上一步': 'Back',
+  '下一步': 'Next',
+  '略過': 'Skip',
+  '開始': 'Start',
+  '歡迎': 'Welcome',
+  '這個工具只用格點上的直線和圓來畫 icon。所有交點都是精確計算的，放大到多大都對得齊。': 'This tool draws icons from nothing but lines and circles on a grid. Every intersection is computed exactly, so things line up at any zoom.',
+  '畫直線': 'Draw a line',
+  '選「直線」，在起點按下，拖到終點再放開。手機上手指可以按住移動調整，放開才放下格點。': 'Pick "Line", press at the start, drag to the end and release. On a phone, keep your finger down to adjust; the point is placed when you lift.',
+  '畫圓': 'Draw a circle',
+  '選「圓」，在圓心按下，拖到圓上的一個格點再放開。': 'Pick "Circle", press at the centre, drag to a grid point on the circle and release.',
+  '做出圓弧': 'Make an arc',
+  '用直線或輔助線穿過圓把它切開，再用「選取」點不要的那一段，按「刪這段」。線重疊的地方，同一點再點一次會換下一段。': 'Cut the circle with a line or a guide, then use "Select" on the piece you do not want and press "Delete piece". Where curves overlap, tap the same spot again for the next piece.',
+  '選「填色」，點一個封閉區域。之後再切開這個區域，切出來的每一塊都保留顏色。': 'Pick "Fill" and tap a closed region. If you cut the region later, every new piece keeps the colour.',
+  '縮放與磁吸': 'Zoom and magnet',
+  '雙指捏合縮放、拖曳平移（電腦用滾輪）。拖到線的端點、圓心或交點附近會自動對齊過去；不想要的話可以在設定關掉「磁吸」。': 'Pinch to zoom and drag with two fingers to pan (scroll wheel on a computer). Dragging near a curve end, a centre or an intersection snaps onto it; turn off "Magnet" in Settings if you prefer.',
+  '匯出與範例': 'Export and examples',
+  '完成後在設定（電腦在右側）下載 PNG 或 SVG。想先看看能做出什麼，可以在「新專案」打開範例。': 'When done, download PNG or SVG from Settings (on the right on a computer). To see what is possible, open an example from "New".',
 };

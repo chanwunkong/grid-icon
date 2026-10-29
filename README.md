@@ -1,6 +1,6 @@
 # 格點幾何 Icon · Grid Geometry Icon
 
-**English**: a web tool for drawing icons on a grid, for phones and desktops. You place points only on grid points; every other point is an intersection of two curves. There are just lines and circles — arcs come from cutting circles and deleting pieces. Intersections, pieces and closed regions are computed exactly (BigInt rationals and p + q√d), floating point is used only for drawing and export. Exports PNG (batch sizes, pixel snapping) and SVG, and can turn a filled SVG into grid circles and lines. The interface follows your browser language (Traditional Chinese or English); switch with the language button. Live: https://chanwunkong.github.io/grid-icon/
+**English**: a web tool for drawing icons on a grid, for phones and desktops. You place points only on grid points; every other point is an intersection of two curves. There are just lines and circles — arcs come from cutting circles and deleting pieces. Intersections, pieces and closed regions are computed exactly (BigInt rationals and p + q√d), floating point is used only for drawing and export. Exports PNG (batch sizes, pixel snapping) and SVG, and can turn an SVG (fills and strokes) into grid circles and lines. Works offline and can be added to the home screen; a short tutorial and original examples help you start. The interface follows your browser language (Traditional Chinese or English); switch with the language button. Live: https://chanwunkong.github.io/grid-icon/
 
 ---
 
@@ -23,6 +23,7 @@
 npm install
 npm run dev        # 開發伺服器，打開終端機顯示的網址
 npm test           # 單元測試（vitest）
+npm run e2e        # 瀏覽器測試（Playwright；本機用已安裝的 Chrome）
 npm run build      # 建置到 dist\
 ```
 
@@ -37,6 +38,12 @@ npm run build      # 建置到 dist\
 | 填色 | 點封閉區域（B） | 點封閉區域 |
 | 縮放 / 平移 | 滾輪；空白鍵或中鍵、右鍵拖曳 | 雙指捏合、拖曳 |
 | 復原 / 重做 | Ctrl+Z / Ctrl+Shift+Z、Ctrl+Y | 上方按鈕 |
+| 重疊的線 | 同一點再點一次換下一段 | 同左 |
+
+- **磁吸**：拖到線的端點、圓心、格點上的交點、畫布角落和中心附近時，自動對齊過去（游標多一個圈）；在「顯示」裡可以關掉。
+- **顏色**：每條線有自己的顏色；被切開的填色區域，每一塊都保留原本的顏色。
+- **教學與範例**：第一次打開會有簡短教學（設定裡可以再看一次）；「新專案」裡有原創範例（不放任何品牌商標）。
+- **離線使用**：可以加到主畫面；看過一次之後沒有網路也能開。
 
 定位點可以放在畫布外（四周各一個畫布大小的範圍），匯出時只輸出畫布範圍。
 
@@ -44,12 +51,10 @@ npm run build      # 建置到 dist\
 
 「新專案」對話框 → 設定格數 → **從 SVG 匯入**：
 
-1. 讀取 SVG 的填色圖形（路徑、圓、矩形、多邊形，含 transform），輪廓拆成圓弧和直線（誤差在圖形大小的 0.1% 內）
+1. 讀取 SVG 的填色和描邊（路徑、圓、矩形、多邊形，含 transform）；描邊先依線寬、線端、轉角轉成填色輪廓。輪廓拆成圓弧和直線（誤差在圖形大小的 0.1% 內）
 2. 每段換成格點上的曲線（圓心在格點、圓上有格點；直線通過兩個格點），沿整條輪廓一起最佳化：相鄰兩段一定在原本的轉角附近相交，轉角多彎不超過 15°
 3. 曲線全部是輔助線，圍出的區域用原本的顏色填色；原圖設成底圖方便比對
 4. 很平的弧（圓心超出可用範圍）用通過格點的直線代替；太小或太細、在這個格數下無法封閉的外框會略過並提示
-
-只支援填色，不支援只有描邊的線條。
 
 ## 專案檔（JSON）
 
@@ -62,9 +67,13 @@ npm run build      # 建置到 dist\
 - `src/editor/`：工具和操作
 - `src/view/`：Canvas 繪製（填色、串接路徑、交會圓點）
 - `src/export/`：PNG（批次、zip）、SVG
-- `tests/`：單元測試
+- `src/import/`：SVG 匯入
+- `src/ui/`：介面（`app.ts` 版面與工具列、`exportPanel`、`referencePanel`、`newDialog`、`tutorial`）
+- `src/examples.ts`：內建範例
+- `public/sw.js`、`manifest.webmanifest`：離線使用、加到主畫面
+- `tests/`：單元測試；`e2e/`：瀏覽器測試（電腦和手機尺寸）
 
 ## 部署
 
-推送到 `main` 分支時，GitHub Actions 會自動執行測試、建置並部署到 GitHub Pages（`.github/workflows/deploy.yml`）。
+推送到 `main` 分支時，GitHub Actions 會自動執行單元測試和瀏覽器測試、建置並部署到 GitHub Pages（`.github/workflows/deploy.yml`）。
 第一次要到 repo 的 **Settings → Pages**，把 **Source** 設成 **GitHub Actions**。

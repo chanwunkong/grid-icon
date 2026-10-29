@@ -2,13 +2,12 @@ import type { Graph } from '../exact/graph';
 import type { Project } from '../model/types';
 import { t } from '../i18n';
 import { buildStrokes, facesByColor, junctionDots, paintFills, paintIcon, strokePath, SvgPath, traceCycle, type Mapper } from '../view/paint';
-import { contentBounds, outlineUnion, traceOutline } from '../view/outline';
+import { contentBounds, outlinesByColor, traceOutline } from '../view/outline';
 
 export interface ExportOptions {
   transparent: boolean;
   background: string;
   margin: number; // grid units around the canvas
-  ink: string; // line colour
   outline: boolean; // strokes as one united filled outline (no seams, pure-fill SVG)
   crop: boolean; // cut everything outside the canvas; off = keep what falls in the margin
 }
@@ -63,14 +62,16 @@ export function renderPNG(project: Project, g: Graph, faceColors: Map<number, st
   }
   if (opts.outline) {
     paintFills(ctx, g, faceColors, m);
-    ctx.beginPath();
-    traceOutline(ctx, outlineUnion(project.curves, g), m);
-    ctx.fillStyle = opts.ink;
-    ctx.fill('nonzero');
+    for (const [color, paths] of outlinesByColor(project.curves, g)) {
+      ctx.beginPath();
+      traceOutline(ctx, paths, m);
+      ctx.fillStyle = color;
+      ctx.fill('nonzero');
+    }
   } else {
     // odd pixel widths sit on pixel centres when shifted half a pixel, so they stay sharp
     const nudge = pixelAligned(m.s) ? (wpx: number) => (Math.round(wpx) % 2 === 1 ? 0.5 : 0) : undefined;
-    paintIcon(ctx, project.curves, g, faceColors, m, opts.ink, nudge);
+    paintIcon(ctx, project.curves, g, faceColors, m, nudge);
   }
   ctx.restore();
   return cv;
@@ -102,10 +103,12 @@ export function renderSVG(project: Project, g: Graph, faceColors: Map<number, st
     out.push(`<path d="${p}" fill="${esc(color)}" fill-rule="nonzero"/>`);
   }
   if (opts.outline) {
-    // pure fills: the united outline of every stroke, one path
-    const p = new SvgPath();
-    traceOutline(p, outlineUnion(project.curves, g), m);
-    if (p.d.length) out.push(`<path d="${p}" fill="${esc(opts.ink)}" fill-rule="nonzero"/>`);
+    // pure fills: the united outline of the strokes, one path per colour
+    for (const [color, paths] of outlinesByColor(project.curves, g)) {
+      const p = new SvgPath();
+      traceOutline(p, paths, m);
+      if (p.d.length) out.push(`<path d="${p}" fill="${esc(color)}" fill-rule="nonzero"/>`);
+    }
     out.push('</g></svg>');
     return out.join('\n');
   }
@@ -113,10 +116,10 @@ export function renderSVG(project: Project, g: Graph, faceColors: Map<number, st
     const p = new SvgPath();
     strokePath(p, g, st, m);
     const miter = st.style.join === 'miter' ? ` stroke-miterlimit="${st.style.miterLimit}"` : '';
-    out.push(`<path d="${p}" fill="none" stroke="${esc(opts.ink)}" stroke-width="${st.style.width}" stroke-linecap="${st.style.cap}" stroke-linejoin="${st.style.join}"${miter}/>`);
+    out.push(`<path d="${p}" fill="none" stroke="${esc(st.style.color)}" stroke-width="${st.style.width}" stroke-linecap="${st.style.cap}" stroke-linejoin="${st.style.join}"${miter}/>`);
   }
   for (const d of junctionDots(project.curves, g))
-    out.push(`<circle cx="${d.x + mg}" cy="${d.y + mg}" r="${d.r}" fill="${esc(opts.ink)}"/>`);
+    out.push(`<circle cx="${d.x + mg}" cy="${d.y + mg}" r="${d.r}" fill="${esc(d.color)}"/>`);
   out.push('</g></svg>');
   return out.join('\n');
 }

@@ -533,6 +533,45 @@ export class Graph {
     return this.innermost(inside);
   }
 
+  /**
+   * Float points just inside a face: beside the middle of each boundary edge, on the face's side
+   * (the left of its half-edges), deepest first. Unchecked; interiorPoint() verifies them exactly.
+   */
+  *facePoints(face: number): Generator<{ x: number; y: number }> {
+    for (const hid of this.cycles[face].halves) {
+      const h = this.halves[hid], e = this.edges[h.edge], pc = this.pieces[e.pieces[0]];
+      const A = this.vertices[h.origin].f, B = this.vertices[h.target].f;
+      let mid: { x: number; y: number }, dir: { x: number; y: number };
+      if (pc.geom.kind === 'line') {
+        mid = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 };
+        dir = { x: B.x - A.x, y: B.y - A.y };
+      } else {
+        const c = pc.geom.c, r = Math.sqrt(Number(pc.geom.r2));
+        const a0 = Math.atan2(A.y - c.y, A.x - c.x);
+        let a1 = Math.atan2(B.y - c.y, B.x - c.x);
+        // forward half-edges run counter-clockwise (increasing angle)
+        if (h.forward) { if (a1 <= a0) a1 += 2 * Math.PI; } else if (a1 >= a0) a1 -= 2 * Math.PI;
+        if (h.origin === h.target) a1 = a0 + (h.forward ? 2 * Math.PI : -2 * Math.PI);
+        const am = (a0 + a1) / 2;
+        mid = { x: c.x + r * Math.cos(am), y: c.y + r * Math.sin(am) };
+        dir = h.forward ? { x: -Math.sin(am), y: Math.cos(am) } : { x: Math.sin(am), y: -Math.cos(am) };
+      }
+      const l = Math.hypot(dir.x, dir.y);
+      if (l < 1e-12) continue;
+      for (const eps of [0.5, 0.25, 0.1, 0.04, 0.02, 0.005]) yield { x: mid.x + (-dir.y / l) * eps, y: mid.y + (dir.x / l) * eps };
+    }
+  }
+
+  /** A rational point strictly inside a face (checked exactly), or null. */
+  interiorPoint(face: number): RPt | null {
+    const dy = (v: number) => new Q(BigInt(Math.round(v * 4096)), 4096n);
+    for (const p of this.facePoints(face)) {
+      const q = { x: dy(p.x), y: dy(p.y) };
+      if (this.locate(q) === face) return q;
+    }
+    return null;
+  }
+
   /** Holes of a face: outer boundaries of components sitting directly inside it. */
   holes(face: number): number[] {
     return this.components.filter((c) => c.parent === face).map((c) => c.outer);

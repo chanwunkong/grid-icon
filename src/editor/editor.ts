@@ -107,10 +107,11 @@ export class Editor {
    * exist and fills whose point is no longer inside a closed region are dropped (as part of the
    * same undo step as the change that caused it).
    */
-  private rebuild(prune: boolean) {
+  private rebuild(prune: boolean, before?: { graph: Graph; faceColors: Map<number, string> }) {
     const { curves } = this.project;
     let { erased, fills } = this.project;
     this.graph = new Graph(curves, erased);
+    this.magnetCache = null;
     const g = this.graph;
     if (prune) {
       erased = erased.filter((e) => {
@@ -127,6 +128,18 @@ export class Editor {
         byFace.set(face, f);
       }
     }
+    // a filled region that got cut keeps its colour in every new piece: a new face with no fill takes
+    // the colour of the old face that contained it
+    if (prune && before && before.faceColors.size) {
+      for (const face of g.faces) {
+        if (byFace.has(face)) continue;
+        const q = g.interiorPoint(face);
+        if (!q) continue;
+        const old = before.graph.locate(q);
+        const color = old === null ? undefined : before.faceColors.get(old);
+        if (color) byFace.set(face, { id: newId(), point: { x: q.x.toString(), y: q.y.toString() }, color });
+      }
+    }
     if (prune) fills = [...byFace.values()];
     this.faceColors = new Map([...byFace].map(([face, f]) => [face, f.color]));
     if (prune) this.project = { ...this.project, erased, fills };
@@ -137,8 +150,10 @@ export class Editor {
   /** An undoable change of the geometry (curves, deleted pieces) or fills. */
   private commit(patch: Partial<Snapshot>) {
     this.record();
+    const before = { graph: this.graph, faceColors: this.faceColors };
     this.project = { ...this.project, ...patch };
-    this.rebuild(true);
+    // fill changes themselves must not be undone by inheritance (removing a fill would bring it back)
+    this.rebuild(true, patch.fills ? undefined : before);
     this.changed();
   }
 
@@ -347,10 +362,48 @@ export class Editor {
     }
   }
 
-  private snap(sx: number, sy: number): Pt {
-    const g = this.vp.toGrid(sx, sy), r = reach(this.project.grid.w, this.project.grid.h);
-    return { x: Math.min(r.x1, Math.max(r.x0, Math.round(g.x))), y: Math.min(r.y1, Math.max(r.y0, Math.round(g.y))) };
+  /** Grid points worth landing on: curve ends and centres, intersections on the grid, canvas corners and centre. */
+  private magnetPoints(): Pt[] {
+    if (this.magnetCache) return this.magnetCache;
+    const { w, h } = this.project.grid, seen = new Set<string>(), out: Pt[] = [];
+    const add = (p: Pt) => {
+      const k = `${p.x},${p.y}`;
+      if (!seen.has(k)) seen.add(k), out.push(p);
+    };
+    for (const c of this.project.curves) {
+      if (c.kind === 'line') add(c.a), add(c.b);
+      else add(c.c), add(c.p);
+    }
+    for (const v of this.graph.vertices) {
+      const x = Math.round(v.f.x), y = Math.round(v.f.y);
+      if (Math.abs(v.f.x - x) < 1e-9 && Math.abs(v.f.y - y) < 1e-9) add({ x, y });
+    }
+    for (const p of [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: 0, y: h }, { x: w, y: h }]) add(p);
+    if (w % 2 === 0 && h % 2 === 0) add({ x: w / 2, y: h / 2 });
+    return (this.magnetCache = out);
   }
+  private magnetCache: Pt[] | null = null;
+  /** Whether the last snap was pulled to a key point (drawn with a ring). */
+  private magnetHit = false;
+
+  private snap(sx: number, sy: number, touch = this.dragTouch): Pt {
+    const g = this.vp.toGrid(sx, sy), r = reach(this.project.grid.w, this.project.grid.h);
+    const plain = { x: Math.min(r.x1, Math.max(r.x0, Math.round(g.x))), y: Math.min(r.y1, Math.max(r.y0, Math.round(g.y))) };
+    this.magnetHit = false;
+    if (!this.magnet) return plain;
+    // a finger covers more screen than a mouse pointer, so it is pulled from further away
+    const radius = (touch ? 14 : 8) / this.vp.scale;
+    let best: Pt | null = null, bd = radius;
+    for (const p of this.magnetPoints()) {
+      const d = Math.hypot(p.x - g.x, p.y - g.y);
+      if (d < bd) [best, bd] = [p, d];
+    }
+    if (!best) return plain;
+    this.magnetHit = true;
+    return best;
+  }
+  /** Magnet: points near a key point snap to it (on by default). */
+  magnet = true;
 
   /** The curve that would be created if the point being dragged were released at `p`. */
   private shapeFor(p: Pt): Curve | null {
@@ -361,19 +414,31 @@ export class Editor {
     return null;
   }
 
+  private lastPick: { x: number; y: number } | null = null;
+
+  /**
+   * Select the piece under a tap. Tapping again at the same spot steps through the other pieces
+   * that are within reach there (overlapping or very close curves), nearest first.
+   */
   private pick(sx: number, sy: number, touch: boolean) {
     const q = this.vp.toGrid(sx, sy), g = this.graph;
     const byId = new Map(this.project.curves.map((c) => [c.id, c]));
-    let best: number | null = null, bd = Infinity;
+    const hits: { index: number; d: number }[] = [];
     for (const pc of g.pieces) {
       if (pc.erased) continue;
       const c = byId.get(pc.curve)!;
       // fingers are less precise than a mouse: accept a wider band around the line
       const d = distanceToPiece(g, pc, q), tol = Math.max(c.guide ? 0 : c.style.width / 2, (touch ? 16 : 6) / this.vp.scale);
-      if (d <= tol && d < bd) [best, bd] = [pc.index, d];
+      if (d <= tol) hits.push({ index: pc.index, d });
     }
-    this.selectedPiece = best;
-    this.selectedId = best === null ? null : g.pieces[best].curve;
+    hits.sort((a, b) => a.d - b.d);
+    const again = this.lastPick && Math.hypot(this.lastPick.x - sx, this.lastPick.y - sy) < (touch ? 12 : 4);
+    const at = again && this.selectedPiece !== null ? hits.findIndex((h) => h.index === this.selectedPiece) : -1;
+    const next = hits.length ? hits[(at + 1) % hits.length].index : null;
+    this.lastPick = { x: sx, y: sy };
+    this.selectedPiece = next;
+    this.selectedId = next === null ? null : g.pieces[next].curve;
+    this.notice = hits.length > 1 ? t('這裡有 {n} 段重疊或相鄰的線，再點一次換下一段', { n: hits.length }) : '';
   }
 
   /** Fill (or un-fill) the closed region under a tap. The point is kept as an exact rational. */
@@ -479,7 +544,10 @@ export class Editor {
     this.canvas.style.width = `${box.width}px`;
     this.canvas.style.height = `${box.height}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (first) this.fit();
+    if (first) {
+      this.fit();
+      this.onChange();
+    }
     this.redraw();
   }
 
@@ -494,6 +562,7 @@ export class Editor {
         graph: this.graph, faceColors: this.faceColors, selectedPiece: this.selectedPiece, overflowing: this.overflowing,
         reference: this.reference,
         hover: this.tool === 'select' || this.tool === 'fill' ? null : this.hover,
+        magnet: this.magnetHit,
         marks: this.marks, preview: this.dragging ? preview : null,
         guide: this.dragging ? this.hover : null, guideTouch: this.dragTouch,
       };
@@ -526,7 +595,7 @@ export class Editor {
         touches.set(e.pointerId, q);
         if (touches.size === 1) {
           tap = q;
-          this.hover = this.snap(q.x, q.y);
+          this.hover = this.snap(q.x, q.y, true);
           this.press(this.hover, true, q.x, q.y);
         } else {
           tap = null; // a second finger turns the touch into a pan / zoom gesture
@@ -544,7 +613,7 @@ export class Editor {
         return;
       }
       if (e.button === 0) {
-        this.hover = this.snap(q.x, q.y);
+        this.hover = this.snap(q.x, q.y, false);
         this.press(this.hover, false, q.x, q.y);
       }
     });
@@ -563,7 +632,7 @@ export class Editor {
         } else if (tap) {
           tap = q;
           if (this.moveReference(q)) return;
-          this.hover = this.snap(q.x, q.y);
+          this.hover = this.snap(q.x, q.y, true);
         }
         this.redraw();
         return;
@@ -573,7 +642,7 @@ export class Editor {
         this.vp.oy += q.y - this.pan.y;
         this.pan = q;
       } else if (!this.moveReference(q)) {
-        this.hover = this.snap(q.x, q.y);
+        this.hover = this.snap(q.x, q.y, false);
       }
       this.redraw();
     });
@@ -581,7 +650,7 @@ export class Editor {
       if (e.pointerType !== 'mouse') {
         if (!touches.delete(e.pointerId)) return;
         if (tap && !cancelled) tap = local(e); // where the finger lifts is the final position
-        if (tap && !cancelled && touches.size === 0) this.release(this.snap(tap.x, tap.y), tap.x, tap.y, true);
+        if (tap && !cancelled && touches.size === 0) this.release(this.snap(tap.x, tap.y, true), tap.x, tap.y, true);
         else if (cancelled) this.abortDrag();
         tap = null;
         if (touches.size < 2) gesture = null;
@@ -597,7 +666,7 @@ export class Editor {
       if (e.button !== 0) return;
       const q = local(e);
       if (cancelled) this.abortDrag();
-      else this.release(this.snap(q.x, q.y), q.x, q.y, false);
+      else this.release(this.snap(q.x, q.y, false), q.x, q.y, false);
     };
     c.addEventListener('pointerup', (e) => up(e, false));
     c.addEventListener('pointercancel', (e) => up(e, true));
